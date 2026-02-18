@@ -1,0 +1,23 @@
+{
+  "name": "discord-bridge",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint src cli tests"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1",
+    "vitest": "^2.1.8"
+  },
+  "bin": { "discord-bridge": "./dist/cli/index.js" }
+}
