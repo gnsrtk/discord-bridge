@@ -1,9 +1,12 @@
 """tests/test_hooks.py — hooks のユニットテスト"""
 
+import io
 import json
 import os
 import sys
 import tempfile
+import unittest.mock as mock
+import uuid
 from pathlib import Path
 
 import pytest
@@ -213,3 +216,75 @@ class TestDbg:
             stop._dbg_initialized = original_initialized
 
         assert not os.path.exists(debug_file)
+
+
+# ---------------------------------------------------------------------------
+# stop.main (last_assistant_message 方式)
+# ---------------------------------------------------------------------------
+
+class TestStopMain:
+    def test_empty_message_exits_without_sending(self):
+        """last_assistant_message が空の場合、送信せずに exit(0) する。"""
+        hook_input = {
+            "session_id": str(uuid.uuid4()),
+            "transcript_path": "",
+            "cwd": "/tmp/test",
+            "last_assistant_message": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("stop.post_message") as mock_post:
+            with pytest.raises(SystemExit) as exc_info:
+                stop.main()
+        assert exc_info.value.code == 0
+        mock_post.assert_not_called()
+
+    def test_message_sent_with_title(self):
+        """有効な last_assistant_message はタイトル付きで Discord に送信される。"""
+        hook_input = {
+            "session_id": str(uuid.uuid4()),
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": "実装完了しました。",
+        }
+        mock_config = {"discord": {"botToken": "token-xxx"}}
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("stop.load_config", return_value=mock_config), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "test-project")), \
+             mock.patch("stop.post_message") as mock_post:
+            stop.main()
+        mock_post.assert_called_once()
+        content = mock_post.call_args[0][2]
+        assert "✅ Claude 完了" in content
+        assert "実装完了しました。" in content
+
+    def test_dedup_prevents_second_send(self, tmp_path):
+        """同一 session_id + transcript_mtime での2回目呼び出しは送信しない（Stop 2重発火対策）。"""
+        session_id = str(uuid.uuid4())
+        # transcript_path なし → mtime = "0"、sentinel key = "{session_id}:0"
+        hook_input = {
+            "session_id": session_id,
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": "完了しました。",
+        }
+        mock_config = {"discord": {"botToken": "token-xxx"}}
+        sentinel = tmp_path / f"discord-bridge-last-sent-{session_id}.txt"
+        mock_post = mock.MagicMock()
+
+        def run_main():
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+                 mock.patch("stop.load_config", return_value=mock_config), \
+                 mock.patch("stop.resolve_channel", return_value=("chan-001", "test-project")), \
+                 mock.patch("stop.Path", side_effect=lambda p: sentinel if "last-sent" in str(p) else Path(p)), \
+                 mock.patch("stop.post_message", mock_post):
+                stop.main()
+
+        # 1回目: 送信される
+        run_main()
+        assert mock_post.call_count == 1
+
+        # 2回目: mtime 同一のためスキップ
+        with pytest.raises(SystemExit) as exc_info:
+            run_main()
+        assert exc_info.value.code == 0
+        assert mock_post.call_count == 1  # 追加呼び出しなし
