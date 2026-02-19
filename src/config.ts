@@ -21,6 +21,7 @@ const ServerSchema = z.object({
     session: z.string().min(1),
   }),
   projects: z.array(ProjectSchema).min(1),
+  permissionTools: z.array(z.string()).optional().default([]),
 });
 
 const ConfigSchema = z.object({

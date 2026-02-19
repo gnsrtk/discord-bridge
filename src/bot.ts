@@ -6,6 +6,7 @@ import {
   type ButtonInteraction,
 } from 'discord.js';
 import { mkdir, writeFile, readdir, stat, unlink } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { type Config, type Server } from './config.js';
 import { TmuxSender } from './tmux-sender.js';
@@ -80,6 +81,42 @@ export async function handleInteractionCreate(
   if (btn.customId === '__other__') {
     try {
       await btn.reply({ content: '📝 回答を入力してください', ephemeral: false });
+    } catch { /* ignore */ }
+    return;
+  }
+
+  // perm: prefix → file-based IPC for permission hooks
+  if (btn.customId.startsWith('perm:')) {
+    // channelId はDiscord Snowflake (数字のみ) であるべき
+    if (!/^\d+$/.test(btn.channelId)) return;
+
+    const action = btn.customId.slice(5); // "allow" | "deny" | "other"
+    const respPath = `/tmp/discord-bridge-perm-${btn.channelId}.json`;
+
+    if (action === 'other') {
+      try {
+        writeFileSync(respPath, JSON.stringify({ decision: 'block' }));
+      } catch (err) {
+        console.error('[discord-bridge] Failed to write permission response:', err);
+      }
+      try {
+        await btn.reply({ content: '📝 理由を入力してください', ephemeral: false });
+      } catch { /* ignore */ }
+      return;
+    }
+
+    const decision = action === 'allow' ? 'allow' : 'deny';
+    try {
+      writeFileSync(respPath, JSON.stringify({ decision }));
+    } catch (err) {
+      console.error('[discord-bridge] Failed to write permission response:', err);
+    }
+
+    try {
+      await btn.reply({
+        content: decision === 'allow' ? '✅ 許可しました' : '❌ 拒否しました',
+        ephemeral: false,
+      });
     } catch { /* ignore */ }
     return;
   }

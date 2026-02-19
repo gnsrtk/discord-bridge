@@ -82,7 +82,8 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
           "projectPath": "/path/to/my-project",
           "model": "claude-sonnet-4-6"
         }
-      ]
+      ],
+      "permissionTools": ["Bash"]
     }
   ]
 }
@@ -101,6 +102,7 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
 | `servers[].projects[].channelId` | Discord channel ID mapped to this project |
 | `servers[].projects[].projectPath` | Absolute path to the directory where Claude Code is launched |
 | `servers[].projects[].model` | Claude model to use (e.g., `claude-sonnet-4-6`) |
+| `servers[].permissionTools` | List of tool names that require Discord permission confirmation before execution (e.g., `["Bash"]`). Defaults to empty |
 
 > **Important**: `servers` requires at least one entry. Each server's `projects` also requires at least one entry. `servers[0].projects[0]` is used as the fallback channel when cwd doesn't match any project.
 
@@ -149,7 +151,7 @@ Three hooks are required for Discord integration. To configure in `.claude/setti
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -169,7 +171,7 @@ Alternatively, add to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md`):
 
 - Stop: python3 /path/to/discord-bridge/hooks/stop.py
 - Notification: python3 /path/to/discord-bridge/hooks/notify.py
-- PreToolUse[AskUserQuestion]: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
+- PreToolUse: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
 ```
 
 ### Hook Roles
@@ -178,7 +180,7 @@ Alternatively, add to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md`):
 | --- | --- | --- |
 | `hooks/stop.py` | Claude finishes responding | Sends Claude's last response (`last_assistant_message`) to Discord |
 | `hooks/notify.py` | Claude fires a notification | Forwards important notifications to Discord (`idle_prompt` is excluded) |
-| `hooks/pre_tool_use.py` | Before tool execution | Converts AskUserQuestion into a Discord message with buttons, blocking tool execution until the user responds |
+| `hooks/pre_tool_use.py` | Before tool execution | Converts AskUserQuestion into a Discord message with buttons. Shows permission confirmation buttons for tools listed in `permissionTools` |
 
 ## Usage
 
@@ -234,6 +236,15 @@ I've generated the image.
 Discord button interactions are also supported.
 The `customId` content is sent directly to the Claude Code session
 (useful for Yes/No confirmations, etc.).
+
+#### Tool Permission Confirmation
+
+When a tool listed in `permissionTools` (e.g., `Bash`) is about to execute, Discord displays **Allow / Deny / Other** buttons.
+
+- **Allow** (green): Permits tool execution
+- **Deny** (red): Blocks tool execution
+- **Other**: Displays "📝 理由を入力してください" (Please enter your reason), and the next message can provide a reason
+- If no response within 120 seconds, Claude Code's default behavior applies
 
 #### Automatic Question Detection
 

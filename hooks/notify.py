@@ -61,7 +61,7 @@ def main() -> None:
     cwd = hook_input.get("cwd", "")
 
     try:
-        channel_id, bot_token, project_name = resolve_channel(config, cwd)
+        channel_id, bot_token, project_name, _ = resolve_channel(config, cwd)
     except ValueError as e:
         print(f"[notify.py] Error: {e}", file=sys.stderr)
         sys.exit(1)
