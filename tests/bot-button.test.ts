@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { handleButtonInteraction, handleInteractionCreate } from '../src/bot.js';
 import { TmuxSender } from '../src/tmux-sender.js';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
@@ -100,5 +101,54 @@ describe('handleInteractionCreate', () => {
     });
     await expect(handleInteractionCreate(btn, 'owner-123', map, defaultSender)).resolves.toBeUndefined();
     expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+  });
+
+  // perm: ボタンテスト
+  test('perm:allow → ファイル書き込み + 許可リプライ', async () => {
+    const btn = makeBtn({ customId: 'perm:allow', channelId: '111222333444555' });
+    const respPath = '/tmp/discord-bridge-perm-111222333444555.json';
+    try { unlinkSync(respPath); } catch { /* ignore */ }
+
+    await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
+
+    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ 許可しました', ephemeral: false });
+    expect(existsSync(respPath)).toBe(true);
+    const data = JSON.parse(readFileSync(respPath, 'utf-8'));
+    expect(data.decision).toBe('allow');
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+
+    try { unlinkSync(respPath); } catch { /* ignore */ }
+  });
+
+  test('perm:deny → ファイル書き込み + 拒否リプライ', async () => {
+    const btn = makeBtn({ customId: 'perm:deny', channelId: '222333444555666' });
+    const respPath = '/tmp/discord-bridge-perm-222333444555666.json';
+    try { unlinkSync(respPath); } catch { /* ignore */ }
+
+    await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
+
+    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ 拒否しました', ephemeral: false });
+    expect(existsSync(respPath)).toBe(true);
+    const data = JSON.parse(readFileSync(respPath, 'utf-8'));
+    expect(data.decision).toBe('deny');
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+
+    try { unlinkSync(respPath); } catch { /* ignore */ }
+  });
+
+  test('perm:other → block ファイル書き込み + 理由入力案内リプライ', async () => {
+    const btn = makeBtn({ customId: 'perm:other', channelId: '999888777666555' });
+    const respPath = '/tmp/discord-bridge-perm-999888777666555.json';
+    try { unlinkSync(respPath); } catch { /* ignore */ }
+
+    await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
+
+    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 理由を入力してください', ephemeral: false });
+    expect(existsSync(respPath)).toBe(true);
+    const data = JSON.parse(readFileSync(respPath, 'utf-8'));
+    expect(data.decision).toBe('block');
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+
+    try { unlinkSync(respPath); } catch { /* ignore */ }
   });
 });

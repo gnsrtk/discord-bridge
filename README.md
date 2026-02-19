@@ -83,7 +83,8 @@ bash install.sh
           "projectPath": "/path/to/my-project",
           "model": "claude-sonnet-4-6"
         }
-      ]
+      ],
+      "permissionTools": ["Bash"]
     }
   ]
 }
@@ -102,6 +103,7 @@ bash install.sh
 | `servers[].projects[].channelId` | このプロジェクトに対応する Discord チャンネル ID |
 | `servers[].projects[].projectPath` | Claude Code を起動するディレクトリの絶対パス |
 | `servers[].projects[].model` | 使用する Claude モデル（例: `claude-sonnet-4-6`） |
+| `servers[].permissionTools` | ツール実行前に Discord で許可確認を行うツール名のリスト（例: `["Bash"]`）。省略時は空 |
 
 > **重要**: `servers` には最低 1 件のエントリが必要です。各サーバーの `projects` にも最低 1 件必要です。`servers[0].projects[0]` は cwd がどのプロジェクトにも一致しない場合のフォールバックチャンネルとして使われます。
 
@@ -150,7 +152,7 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -170,7 +172,7 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
 
 - Stop: python3 /path/to/discord-bridge/hooks/stop.py
 - Notification: python3 /path/to/discord-bridge/hooks/notify.py
-- PreToolUse[AskUserQuestion]: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
+- PreToolUse: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
 ```
 
 ### hooks の役割
@@ -179,7 +181,7 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
 | --- | --- | --- |
 | `hooks/stop.py` | Claude が応答完了 | Claude の最後の返答テキスト（`last_assistant_message`）を Discord へ送信 |
 | `hooks/notify.py` | Claude が通知を発火 | 重要な通知を Discord へ転送（`idle_prompt` は除外） |
-| `hooks/pre_tool_use.py` | ツール実行前 | AskUserQuestion を Discord のボタン付きメッセージに変換し、ユーザーの操作完了までツール実行をブロック |
+| `hooks/pre_tool_use.py` | ツール実行前 | AskUserQuestion を Discord のボタン付きメッセージに変換。`permissionTools` に設定されたツールの許可確認ボタンを表示 |
 
 ## 使い方
 
@@ -235,6 +237,15 @@ Claude の応答に `[DISCORD_ATTACH: filename]` マーカーを含めると、
 Discord のボタンインタラクションも受け付けます。
 `customId` の内容が Claude Code のセッションへそのまま送信されます
 （Yes/No 確認などに活用できます）。
+
+#### ツール実行の許可確認
+
+`permissionTools` に設定したツール（例: `Bash`）の実行前に、Discord で **許可 / 拒否 / それ以外** の3ボタンが表示されます。
+
+- **許可**（緑）: ツール実行を許可します
+- **拒否**（赤）: ツール実行を拒否します
+- **それ以外**: 「📝 理由を入力してください」と表示され、次のメッセージで理由を送信できます
+- 120秒以内に応答がない場合は Claude Code のデフォルト動作に委ねられます
 
 #### 質問パターンの自動検出
 

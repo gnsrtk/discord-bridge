@@ -42,7 +42,11 @@ describe('loadConfig', () => {
   test('正常なJSONを正しくパースする', () => {
     writeFileSync(CONFIG_PATH, JSON.stringify(validConfig));
     const config = loadConfig(CONFIG_PATH);
-    expect(config).toEqual(validConfig);
+    // permissionTools はデフォルト値 [] が Zod で付与される
+    expect(config).toEqual({
+      ...validConfig,
+      servers: validConfig.servers.map((s) => ({ ...s, permissionTools: [] })),
+    });
   });
 
   test('全フィールドが必須（デフォルト値なし）', () => {

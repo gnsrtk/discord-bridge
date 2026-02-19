@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest.mock as mock
 import uuid
 from pathlib import Path
@@ -15,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 
 import stop  # noqa: E402  (パス追加後のインポートのため)
+import pre_tool_use  # noqa: E402
 from lib.config import resolve_channel  # noqa: E402
 from lib.transcript import get_assistant_messages  # noqa: E402
 
@@ -250,7 +252,7 @@ class TestStopMain:
         mock_config = {"schemaVersion": 2, "servers": []}
         with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
              mock.patch("stop.load_config", return_value=mock_config), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
              mock.patch("stop.post_message") as mock_post:
             stop.main()
         mock_post.assert_called_once()
@@ -275,7 +277,7 @@ class TestStopMain:
         def run_main():
             with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
                  mock.patch("stop.load_config", return_value=mock_config), \
-                 mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
+                 mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
                  mock.patch("stop.Path", side_effect=lambda p: sentinel if "last-sent" in str(p) else Path(p)), \
                  mock.patch("stop.post_message", mock_post):
                 stop.main()
@@ -322,7 +324,7 @@ class TestResolveChannel:
                 self._make_project("proj-b", "ch-b", "/home/user/proj-b"),
             ]),
         ])
-        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/proj-b")
+        channel_id, bot_token, project_name, _ = resolve_channel(config, "/home/user/proj-b")
         assert channel_id == "ch-b"
         assert bot_token == "token-work"
         assert project_name == "proj-b"
@@ -334,7 +336,7 @@ class TestResolveChannel:
                 self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
             ]),
         ])
-        channel_id, bot_token, _ = resolve_channel(config, "/home/user/proj-a/src/components")
+        channel_id, bot_token, _, _ = resolve_channel(config, "/home/user/proj-a/src/components")
         assert channel_id == "ch-a"
         assert bot_token == "token-personal"
 
@@ -345,7 +347,7 @@ class TestResolveChannel:
                 self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
             ]),
         ])
-        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/unknown")
+        channel_id, bot_token, project_name, _ = resolve_channel(config, "/home/user/unknown")
         assert channel_id == "ch-a"
         assert bot_token == "token-personal"
         assert project_name is None
@@ -358,7 +360,7 @@ class TestResolveChannel:
                 self._make_project("nested", "ch-nested", "/home/user/nested"),
             ]),
         ])
-        channel_id, _, project_name = resolve_channel(config, "/home/user/nested/src")
+        channel_id, _, project_name, _ = resolve_channel(config, "/home/user/nested/src")
         assert channel_id == "ch-nested"
         assert project_name == "nested"
 
@@ -372,7 +374,7 @@ class TestResolveChannel:
                 self._make_project("nested", "ch-nested", "/home/user/nested"),
             ]),
         ])
-        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/nested/src")
+        channel_id, bot_token, project_name, _ = resolve_channel(config, "/home/user/nested/src")
         assert channel_id == "ch-nested"
         assert bot_token == "token-work"
         assert project_name == "nested"
@@ -381,6 +383,27 @@ class TestResolveChannel:
         """servers が空の場合は ValueError"""
         with pytest.raises(ValueError):
             resolve_channel({"servers": []}, "/some/path")
+
+    def test_permission_tools_returned(self):
+        """permissionTools がサーバーに設定されている場合、4番目の要素として返される"""
+        config = self._make_config([{
+            **self._make_server("personal", "token-personal", "personal", [
+                self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
+            ]),
+            "permissionTools": ["Bash", "Write"],
+        }])
+        _, _, _, permission_tools = resolve_channel(config, "/home/user/proj-a")
+        assert permission_tools == ["Bash", "Write"]
+
+    def test_permission_tools_default_empty(self):
+        """permissionTools 未設定の場合は空リストが返される"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
+            ]),
+        ])
+        _, _, _, permission_tools = resolve_channel(config, "/home/user/proj-a")
+        assert permission_tools == []
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +477,7 @@ class TestStopMainWithButtons:
         hook_input = self._make_hook_input("この変更を適用しますか？")
         with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
              mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
              mock.patch("stop.post_message_with_buttons") as mock_buttons, \
              mock.patch("stop.post_message") as mock_plain:
             stop.main()
@@ -466,7 +489,7 @@ class TestStopMainWithButtons:
         hook_input = self._make_hook_input("実装完了しました。")
         with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
              mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
              mock.patch("stop.post_message_with_buttons") as mock_buttons, \
              mock.patch("stop.post_message") as mock_plain:
             stop.main()
@@ -480,7 +503,7 @@ class TestStopMainWithButtons:
         )
         with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
              mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
              mock.patch("stop.post_message_with_files") as mock_files, \
              mock.patch("stop.post_message_with_buttons") as mock_buttons, \
              mock.patch("stop.post_message") as mock_plain:
@@ -488,3 +511,204 @@ class TestStopMainWithButtons:
         mock_files.assert_called_once()
         mock_buttons.assert_not_called()
         mock_plain.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# format_tool_info
+# ---------------------------------------------------------------------------
+
+class TestFormatToolInfo:
+    def test_bash_command(self):
+        """Bash ツールはコマンドを表示する。"""
+        result = pre_tool_use.format_tool_info("Bash", {"command": "ls -la"})
+        assert result == "Bash: ls -la"
+
+    def test_write_file_path(self):
+        """Write ツールはファイルパスを表示する。"""
+        result = pre_tool_use.format_tool_info("Write", {"file_path": "/tmp/test.txt"})
+        assert result == "Write: /tmp/test.txt"
+
+    def test_edit_file_path(self):
+        """Edit ツールはファイルパスを表示する。"""
+        result = pre_tool_use.format_tool_info("Edit", {"file_path": "/src/app.ts"})
+        assert result == "Edit: /src/app.ts"
+
+    def test_unknown_tool_json(self):
+        """不明なツールは JSON 表示する。"""
+        result = pre_tool_use.format_tool_info("CustomTool", {"key": "value"})
+        assert result.startswith("CustomTool: ")
+        assert '"key"' in result
+
+    def test_long_input_truncated(self):
+        """長い入力は 200 文字 + 省略記号で切り詰められる。"""
+        long_value = "x" * 500
+        result = pre_tool_use.format_tool_info("SomeTool", {"data": long_value})
+        # "SomeTool: " + 200 chars + "…"
+        json_part = result[len("SomeTool: "):]
+        assert json_part.endswith("…")
+        assert len(json_part) == 201  # 200 + "…"
+
+    def test_bash_no_command(self):
+        """Bash で command がない場合のフォールバック。"""
+        result = pre_tool_use.format_tool_info("Bash", {})
+        assert result == "Bash: (no command)"
+
+
+# ---------------------------------------------------------------------------
+# wait_for_permission
+# ---------------------------------------------------------------------------
+
+class TestWaitForPermission:
+    def test_response_file_found(self, tmp_path):
+        """応答ファイルがある場合、結果を返す。"""
+        import threading
+
+        channel_id = "test-channel-123"
+        resp_file = Path(f"/tmp/discord-bridge-perm-{channel_id}.json")
+        resp_file.unlink(missing_ok=True)
+
+        def write_response():
+            time.sleep(0.3)
+            resp_file.write_text(json.dumps({"decision": "allow"}))
+
+        with mock.patch.object(pre_tool_use, "PERM_POLL_INTERVAL", 0.1), \
+             mock.patch.object(pre_tool_use, "PERM_TIMEOUT", 3):
+            t = threading.Thread(target=write_response)
+            t.start()
+            result = pre_tool_use.wait_for_permission(channel_id)
+            t.join()
+
+        assert result == {"decision": "allow"}
+
+    def test_timeout_returns_none(self):
+        """タイムアウトの場合、None を返す。"""
+        channel_id = "test-timeout-456"
+        resp_file = Path(f"/tmp/discord-bridge-perm-{channel_id}.json")
+        resp_file.unlink(missing_ok=True)
+
+        with mock.patch.object(pre_tool_use, "PERM_POLL_INTERVAL", 0.05), \
+             mock.patch.object(pre_tool_use, "PERM_TIMEOUT", 0.1):
+            result = pre_tool_use.wait_for_permission(channel_id)
+
+        assert result is None
+
+    def test_old_response_cleared(self, tmp_path):
+        """古い応答ファイルがクリアされる。"""
+        channel_id = "test-clear-789"
+        resp_file = Path(f"/tmp/discord-bridge-perm-{channel_id}.json")
+        resp_file.write_text(json.dumps({"decision": "old"}))
+
+        import threading
+
+        def write_new_response():
+            time.sleep(0.3)
+            resp_file.write_text(json.dumps({"decision": "deny"}))
+
+        with mock.patch.object(pre_tool_use, "PERM_POLL_INTERVAL", 0.1), \
+             mock.patch.object(pre_tool_use, "PERM_TIMEOUT", 3):
+            t = threading.Thread(target=write_new_response)
+            t.start()
+            result = pre_tool_use.wait_for_permission(channel_id)
+            t.join()
+
+        assert result == {"decision": "deny"}
+
+
+# ---------------------------------------------------------------------------
+# pre_tool_use.main (permission tools)
+# ---------------------------------------------------------------------------
+
+class TestPreToolUsePermission:
+    def _mock_config(self):
+        return {"schemaVersion": 2, "servers": []}
+
+    def test_permission_tool_sends_buttons_and_allows(self):
+        """permissionTools に含まれるツールはボタン送信 + IPC で許可を返す。"""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /tmp/test"},
+            "cwd": "/tmp/test-project",
+            "transcript_path": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("pre_tool_use.load_config", return_value=self._mock_config()), \
+             mock.patch("pre_tool_use.resolve_channel", return_value=("chan-001", "token-xxx", None, ["Bash"])), \
+             mock.patch("pre_tool_use.post_permission_buttons") as mock_perm_buttons, \
+             mock.patch("pre_tool_use.wait_for_permission", return_value={"decision": "allow"}), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            pre_tool_use.main()
+
+        mock_perm_buttons.assert_called_once()
+        output = json.loads(mock_stdout.getvalue())
+        assert output["decision"] == "allow"
+
+    def test_permission_tool_deny(self):
+        """permissionTools で拒否が返された場合、deny を出力する。"""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "dangerous-command"},
+            "cwd": "/tmp/test-project",
+            "transcript_path": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("pre_tool_use.load_config", return_value=self._mock_config()), \
+             mock.patch("pre_tool_use.resolve_channel", return_value=("chan-001", "token-xxx", None, ["Bash"])), \
+             mock.patch("pre_tool_use.post_permission_buttons"), \
+             mock.patch("pre_tool_use.wait_for_permission", return_value={"decision": "deny"}), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            pre_tool_use.main()
+
+        output = json.loads(mock_stdout.getvalue())
+        assert output["decision"] == "deny"
+
+    def test_non_permission_tool_exits(self):
+        """permissionTools に含まれないツールは exit(0) する。"""
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/test.txt"},
+            "cwd": "/tmp/test-project",
+            "transcript_path": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("pre_tool_use.load_config", return_value=self._mock_config()), \
+             mock.patch("pre_tool_use.resolve_channel", return_value=("chan-001", "token-xxx", None, ["Bash"])):
+            with pytest.raises(SystemExit) as exc_info:
+                pre_tool_use.main()
+        assert exc_info.value.code == 0
+
+    def test_permission_tool_block(self):
+        """permissionTools で block（それ以外）が返された場合、block を出力する。"""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "some-command"},
+            "cwd": "/tmp/test-project",
+            "transcript_path": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("pre_tool_use.load_config", return_value=self._mock_config()), \
+             mock.patch("pre_tool_use.resolve_channel", return_value=("chan-001", "token-xxx", None, ["Bash"])), \
+             mock.patch("pre_tool_use.post_permission_buttons"), \
+             mock.patch("pre_tool_use.wait_for_permission", return_value={"decision": "block"}), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            pre_tool_use.main()
+
+        output = json.loads(mock_stdout.getvalue())
+        assert output["decision"] == "block"
+        assert "Other" in output.get("reason", "")
+
+    def test_permission_timeout_exits(self):
+        """タイムアウト時は exit(0) する。"""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hello"},
+            "cwd": "/tmp/test-project",
+            "transcript_path": "",
+        }
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("pre_tool_use.load_config", return_value=self._mock_config()), \
+             mock.patch("pre_tool_use.resolve_channel", return_value=("chan-001", "token-xxx", None, ["Bash"])), \
+             mock.patch("pre_tool_use.post_permission_buttons"), \
+             mock.patch("pre_tool_use.wait_for_permission", return_value=None):
+            with pytest.raises(SystemExit) as exc_info:
+                pre_tool_use.main()
+        assert exc_info.value.code == 0

@@ -24,7 +24,8 @@
           "projectPath": "/path/to/my-project",
           "model": "claude-sonnet-4-6"
         }
-      ]
+      ],
+      "permissionTools": ["Bash"]
     }
   ]
 }
