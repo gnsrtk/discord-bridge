@@ -32,7 +32,7 @@ Discord チャンネルへ返信
 
 - **Node.js** 18 以上
 - **tmux** 3.0 以上
-- **Claude Code** (`claude` コマンドが PATH に存在すること)
+- **Claude Code** 2.1.47 以上（`last_assistant_message` フィールド対応バージョン）
 - **Python** 3.10 以上（hooks 用）
 - **Discord Bot トークン**（後述）
 
@@ -158,7 +158,7 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
 
 | ファイル | タイミング | 役割 |
 | --- | --- | --- |
-| `hooks/stop.py` | Claude が応答完了 | 最後のユーザー入力以降の全アシスタントメッセージを Discord へ送信 |
+| `hooks/stop.py` | Claude が応答完了 | Claude の最後の返答テキスト（`last_assistant_message`）を Discord へ送信 |
 | `hooks/notify.py` | Claude が通知を発火 | 重要な通知を Discord へ転送（`idle_prompt` は除外） |
 | `hooks/pre_tool_use.py` | ツール実行前 | AskUserQuestion を Discord のボタン付きメッセージに変換し、ユーザーの操作完了までツール実行をブロック |
 
@@ -192,7 +192,7 @@ discord-bridge stop    # 停止
 ### 返信（Claude Code → Discord）
 
 1. Claude Code が処理を完了すると Stop フック（`stop.py`）が呼び出される
-2. transcript ファイルから最後のユーザー入力以降の全アシスタントメッセージを取得
+2. hook input の `last_assistant_message` フィールドから最後のアシスタントメッセージを取得
 3. `cwd` と `projectPath` を照合して送信先チャンネルを決定
 4. Discord API へ POST（テキスト + ファイル添付対応）
 

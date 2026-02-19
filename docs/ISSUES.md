@@ -56,5 +56,5 @@
 | 35 | ✅ | Bot 起動時の `🟢 Bot 起動` 通知が README に未記載 | `README.md` (未記載), `src/bot.ts` L144-156 | 「使い方」の `start` 説明に追記済み |
 | 36 | ✅ | `DISCORD_BRIDGE_DEBUG=1 discord-bridge start` と記載されているが、フックは Claude Code が別プロセスで実行するため `discord-bridge` のプロセス環境変数では有効にならない | `README.md` L201 | `~/.zshrc` に `export DISCORD_BRIDGE_DEBUG=1` を追記する方法に修正済み（`~/.claude/.env` はフックに継承されないため不可） |
 | 37 | ✅ | AskUserQuestion 呼び出し前のアシスタントテキスト（比較表・説明など）が Discord に届かない。PreToolUse hook 発火時点では Stop hook は未発火のため | `hooks/pre_tool_use.py` | `lib/transcript.py` に共通化した `get_assistant_messages` を使い、直前テキストをボタンメッセージに付加するよう修正済み |
-| 38 | ✅ | 複数メッセージ連続送信時に Discord のレート制限（HTTP 429）で後続メッセージが欠落する | `hooks/stop.py` | `_send_request()` ヘルパーで 429 時に `Retry-After` バックオフリトライ（最大3回）を追加、メッセージ間に 1 秒 delay を追加 |
-| 39 | ✅ | Bot 再起動直後に Stop hook が送信するメッセージが Discord に届かない（Stop が transcript 書き込み完了前に発火 or 🟢 起動通知と競合） | `hooks/stop.py` L196, `src/bot.ts` L144 | transcript 待機を最大5秒に延長（6リトライ）、ClientReady での🟢送信間に 1 秒 delay を追加、`~/.zshrc` に `DISCORD_BRIDGE_DEBUG=1` を追加して原因追跡を可能に |
+| 38 | ✅ | 複数メッセージ連続送信時に Discord のレート制限（HTTP 429）で後続メッセージが欠落する | `hooks/stop.py` | `last_assistant_message` 移行（2026-02-19）で根本解決。Discord API 呼び出しが常に1件になりレート制限リスクがほぼゼロに。安全弁として `_send_request()` の 429 Retry-After リトライ（最大3回）は維持 |
+| 39 | ✅ | Bot 再起動直後に Stop hook が送信するメッセージが Discord に届かない（Stop が transcript 書き込み完了前に発火 or 🟢 起動通知と競合） | `hooks/stop.py` L196, `src/bot.ts` L144 | `last_assistant_message` 移行（2026-02-19）で根本解決。メッセージが hook input に直接入るため transcript 書き込みとの race condition がなくなった。ClientReady での🟢送信間の 1 秒 delay は維持 |

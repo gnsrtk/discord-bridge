@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop hook: transcriptの最終assistantメッセージをDiscordに送信する"""
+"""Stop hook: last_assistant_messageをDiscordに送信する"""
 
 import json
 import os
@@ -152,7 +152,6 @@ def post_message_with_files(
     _send_request(req, timeout=30)
 
 
-
 def post_message(bot_token: str, channel_id: str, content: str) -> None:
     payload = json.dumps({"content": content}).encode()
     url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
@@ -179,29 +178,25 @@ def main() -> None:
     transcript_path = hook_input.get("transcript_path", "")
     cwd = hook_input.get("cwd", "")
     session_id = hook_input.get("session_id", "")
+    message = (hook_input.get("last_assistant_message") or "").strip()
 
     if DEBUG:
         _dbg(f"hook_input keys: {list(hook_input.keys())}")
-        if transcript_path:
-            try:
-                lines = Path(transcript_path).read_text().splitlines()
-                _dbg(f"transcript lines: {len(lines)}")
-                if lines:
-                    _dbg(f"last line: {lines[-1][:300]}")
-            except OSError as e:
-                _dbg(f"read error: {e}")
+        _dbg(f"last_assistant_message: {message[:100]!r}")
 
-    # アシスタント応答が出るまで最大5秒待つ（Stop が応答書き込みより先に発火する対策）
-    messages: list[str] = []
-    for attempt in range(6):
-        messages = get_assistant_messages(transcript_path) if transcript_path else []
-        if messages:
-            break
-        if attempt < 5:
-            time.sleep(1)
+    # last_assistant_message が空の場合は transcript フォールバック（v2.1.47 未満の互換）
+    if not message and transcript_path:
+        _dbg("last_assistant_message empty, falling back to transcript")
+        for attempt in range(6):
+            msgs = get_assistant_messages(transcript_path)
+            if msgs:
+                message = msgs[-1]
+                break
+            if attempt < 5:
+                time.sleep(1)
 
-    if not messages:
-        _dbg("skipped: no assistant message after retries")
+    if not message:
+        _dbg("skipped: no assistant message")
         sys.exit(0)
 
     # transcript の mtime で重複判定（Interrupted時のStop再発火対策）
@@ -243,28 +238,18 @@ def main() -> None:
         cwd_label = Path(cwd).name if cwd else "unknown"
         title = f"✅ Claude 完了 [{cwd_label}]"
 
-    # 最初のメッセージにタイトルを付けて送信、以降はそのまま送信
-    # メッセージ間に 1 秒 delay を入れてレート制限を回避する
-    for i, message in enumerate(messages):
-        if i > 0:
-            time.sleep(1)
-        clean_message, attach_paths = extract_attachments(message)
-        if i == 0:
-            display_text = f"{title}\n{clean_message}" if clean_message else title
+    clean_message, attach_paths = extract_attachments(message)
+    display_text = f"{title}\n{clean_message}" if clean_message else title
+    _dbg(f"sending: text={display_text[:40]!r} attach={len(attach_paths)}")
+    try:
+        if attach_paths:
+            post_message_with_files(bot_token, channel_id, display_text, attach_paths)
         else:
-            display_text = clean_message
-        if not display_text and not attach_paths:
-            continue
-        _dbg(f"sending msg {i+1}/{len(messages)}: text={display_text[:40]!r} attach={len(attach_paths)}")
-        try:
-            if attach_paths:
-                post_message_with_files(bot_token, channel_id, display_text, attach_paths)
-            else:
-                post_message(bot_token, channel_id, display_text)
-            _dbg(f"msg {i+1} sent OK")
-        except urllib.error.URLError as e:
-            print(f"[stop.py] API request failed: {e}", file=sys.stderr)
-            sys.exit(1)
+            post_message(bot_token, channel_id, display_text)
+        _dbg("sent OK")
+    except urllib.error.URLError as e:
+        print(f"[stop.py] API request failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
