@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 
 import stop  # noqa: E402  (パス追加後のインポートのため)
+from lib.config import resolve_channel  # noqa: E402
 from lib.transcript import get_assistant_messages  # noqa: E402
 
 
@@ -246,10 +247,10 @@ class TestStopMain:
             "cwd": "/tmp/test-project",
             "last_assistant_message": "実装完了しました。",
         }
-        mock_config = {"discord": {"botToken": "token-xxx"}}
+        mock_config = {"schemaVersion": 2, "servers": []}
         with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
              mock.patch("stop.load_config", return_value=mock_config), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "test-project")), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
              mock.patch("stop.post_message") as mock_post:
             stop.main()
         mock_post.assert_called_once()
@@ -267,14 +268,14 @@ class TestStopMain:
             "cwd": "/tmp/test-project",
             "last_assistant_message": "完了しました。",
         }
-        mock_config = {"discord": {"botToken": "token-xxx"}}
+        mock_config = {"schemaVersion": 2, "servers": []}
         sentinel = tmp_path / f"discord-bridge-last-sent-{session_id}.txt"
         mock_post = mock.MagicMock()
 
         def run_main():
             with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
                  mock.patch("stop.load_config", return_value=mock_config), \
-                 mock.patch("stop.resolve_channel", return_value=("chan-001", "test-project")), \
+                 mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project")), \
                  mock.patch("stop.Path", side_effect=lambda p: sentinel if "last-sent" in str(p) else Path(p)), \
                  mock.patch("stop.post_message", mock_post):
                 stop.main()
@@ -288,3 +289,95 @@ class TestStopMain:
             run_main()
         assert exc_info.value.code == 0
         assert mock_post.call_count == 1  # 追加呼び出しなし
+
+
+# ---------------------------------------------------------------------------
+# resolve_channel (v2)
+# ---------------------------------------------------------------------------
+
+class TestResolveChannel:
+    """hooks/lib/config.py の resolve_channel (v2) のテスト"""
+
+    def _make_config(self, servers: list) -> dict:
+        return {"schemaVersion": 2, "servers": servers}
+
+    def _make_server(self, name: str, token: str, session: str, projects: list) -> dict:
+        return {
+            "name": name,
+            "discord": {"botToken": token, "ownerUserId": "owner"},
+            "tmux": {"session": session},
+            "projects": projects,
+        }
+
+    def _make_project(self, name: str, channel: str, path: str) -> dict:
+        return {"name": name, "channelId": channel, "projectPath": path, "model": "m"}
+
+    def test_exact_match_returns_correct_server(self):
+        """cwd が projectPath と完全一致する場合、正しいサーバーの情報を返す"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
+            ]),
+            self._make_server("work", "token-work", "work", [
+                self._make_project("proj-b", "ch-b", "/home/user/proj-b"),
+            ]),
+        ])
+        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/proj-b")
+        assert channel_id == "ch-b"
+        assert bot_token == "token-work"
+        assert project_name == "proj-b"
+
+    def test_prefix_match(self):
+        """cwd がサブディレクトリの場合も一致する"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
+            ]),
+        ])
+        channel_id, bot_token, _ = resolve_channel(config, "/home/user/proj-a/src/components")
+        assert channel_id == "ch-a"
+        assert bot_token == "token-personal"
+
+    def test_fallback_returns_first_server_first_project(self):
+        """不一致時は servers[0].projects[0] にフォールバック"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("proj-a", "ch-a", "/home/user/proj-a"),
+            ]),
+        ])
+        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/unknown")
+        assert channel_id == "ch-a"
+        assert bot_token == "token-personal"
+        assert project_name is None
+
+    def test_longest_prefix_wins(self):
+        """より長いプレフィックスにマッチした project が優先される"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("root", "ch-root", "/home/user"),
+                self._make_project("nested", "ch-nested", "/home/user/nested"),
+            ]),
+        ])
+        channel_id, _, project_name = resolve_channel(config, "/home/user/nested/src")
+        assert channel_id == "ch-nested"
+        assert project_name == "nested"
+
+    def test_longest_prefix_wins_cross_server(self):
+        """異なる server 間でも最長プレフィックスが優先される"""
+        config = self._make_config([
+            self._make_server("personal", "token-personal", "personal", [
+                self._make_project("root", "ch-root", "/home/user"),
+            ]),
+            self._make_server("work", "token-work", "work", [
+                self._make_project("nested", "ch-nested", "/home/user/nested"),
+            ]),
+        ])
+        channel_id, bot_token, project_name = resolve_channel(config, "/home/user/nested/src")
+        assert channel_id == "ch-nested"
+        assert bot_token == "token-work"
+        assert project_name == "nested"
+
+    def test_empty_servers_raises(self):
+        """servers が空の場合は ValueError"""
+        with pytest.raises(ValueError):
+            resolve_channel({"servers": []}, "/some/path")

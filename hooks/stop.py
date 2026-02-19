@@ -221,10 +221,8 @@ def main() -> None:
         print(f"[stop.py] Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    bot_token = config["discord"]["botToken"]
-
     try:
-        channel_id, project_name = resolve_channel(config, cwd)
+        channel_id, bot_token, project_name = resolve_channel(config, cwd)
     except ValueError as e:
         print(f"[stop.py] Error: {e}", file=sys.stderr)
         sys.exit(1)

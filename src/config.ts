@@ -10,20 +10,26 @@ const ProjectSchema = z.object({
   model: z.string().min(1),
 });
 
-const ConfigSchema = z.object({
-  schemaVersion: z.literal(1),
-  tmux: z.object({
-    session: z.string().min(1),
-  }),
+const ServerSchema = z.object({
+  name: z.string().min(1),
   discord: z.object({
     botToken: z.string().min(1),
     guildId: z.string().optional(),
     ownerUserId: z.string().min(1),
   }),
+  tmux: z.object({
+    session: z.string().min(1),
+  }),
   projects: z.array(ProjectSchema).min(1),
 });
 
+const ConfigSchema = z.object({
+  schemaVersion: z.literal(2),
+  servers: z.array(ServerSchema).min(1),
+});
+
 export type Config = z.infer<typeof ConfigSchema>;
+export type Server = z.infer<typeof ServerSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.discord-bridge', 'config.json');

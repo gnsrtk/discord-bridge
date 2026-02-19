@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { mkdir, writeFile, readdir, stat, unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { type Config } from './config.js';
+import { type Config, type Server } from './config.js';
 import { TmuxSender } from './tmux-sender.js';
 
 const UPLOAD_DIR = '/tmp/discord-uploads';
@@ -118,7 +118,7 @@ async function cleanUploadDir(): Promise<void> {
   } catch { /* ignore if dir does not exist */ }
 }
 
-export function createBot(config: Config): Client {
+export function createServerBot(server: Server): Client {
   void cleanUploadDir();
 
   const client = new Client({
@@ -129,22 +129,21 @@ export function createBot(config: Config): Client {
     ],
   });
 
-  const session = config.tmux.session;
+  const session = server.tmux.session;
   const defaultSender = new TmuxSender(`${session}:0`);
 
-  // channelId → TmuxSender のマップ（プロジェクト固有のウィンドウ名で識別）
   const channelSenderMap = new Map<string, TmuxSender>();
-  for (const project of config.projects) {
+  for (const project of server.projects) {
     const target = `${session}:${project.name}`;
     channelSenderMap.set(project.channelId, new TmuxSender(target));
   }
 
-  const listenChannelIds = new Set(config.projects.map((p) => p.channelId));
+  const listenChannelIds = new Set(server.projects.map((p) => p.channelId));
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`[discord-bridge] Bot ready: ${c.user.tag}`);
     let isFirst = true;
-    for (const project of config.projects) {
+    for (const project of server.projects) {
       if (!isFirst) await new Promise<void>((resolve) => { setTimeout(resolve, 1000); });
       isFirst = false;
       try {
@@ -160,7 +159,7 @@ export function createBot(config: Config): Client {
 
   client.on(Events.MessageCreate, async (msg: Message) => {
     if (msg.author.bot) return;
-    if (msg.author.id !== config.discord.ownerUserId) return;
+    if (msg.author.id !== server.discord.ownerUserId) return;
     if (!listenChannelIds.has(msg.channelId)) return;
     const sender = channelSenderMap.get(msg.channelId) ?? defaultSender;
 
@@ -191,14 +190,30 @@ export function createBot(config: Config): Client {
   });
 
   client.on(Events.InteractionCreate, (interaction) =>
-    handleInteractionCreate(interaction, config.discord.ownerUserId, channelSenderMap, defaultSender),
+    handleInteractionCreate(interaction, server.discord.ownerUserId, channelSenderMap, defaultSender),
   );
 
   return client;
 }
 
-export async function startBot(config: Config): Promise<Client> {
-  const client = createBot(config);
-  await client.login(config.discord.botToken);
+export async function startServerBot(server: Server): Promise<Client> {
+  const client = createServerBot(server);
+  await client.login(server.discord.botToken);
   return client;
+}
+
+export function warnDuplicateChannels(config: Config): void {
+  const seen = new Map<string, string>();
+  for (const server of config.servers) {
+    for (const project of server.projects) {
+      const existing = seen.get(project.channelId);
+      if (existing) {
+        console.warn(
+          `[discord-bridge] Warning: channelId "${project.channelId}" shared between "${existing}" and "${server.name}/${project.name}"`,
+        );
+      } else {
+        seen.set(project.channelId, `${server.name}/${project.name}`);
+      }
+    }
+  }
 }

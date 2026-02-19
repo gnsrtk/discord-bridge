@@ -4,8 +4,8 @@ import { writeFileSync, readFileSync, unlinkSync, openSync, closeSync, mkdirSync
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, type Config } from '../src/config.js';
-import { startBot } from '../src/bot.js';
+import { loadConfig, type Config, type Server } from '../src/config.js';
+import { startServerBot, warnDuplicateChannels } from '../src/bot.js';
 import { type Client } from 'discord.js';
 
 const CONFIG_DIR = join(homedir(), '.discord-bridge');
@@ -36,8 +36,8 @@ export function tmuxWindowExists(session: string, windowName: string): boolean {
   }
 }
 
-export function setupTmuxWindows(config: Config): void {
-  const session = config.tmux.session;
+export function setupTmuxWindowsForServer(server: Server): void {
+  const session = server.tmux.session;
 
   if (!tmuxSessionExists(session)) {
     try {
@@ -45,10 +45,11 @@ export function setupTmuxWindows(config: Config): void {
       console.log(`[discord-bridge] Session "${session}" created`);
     } catch (err) {
       console.error(`[discord-bridge] Failed to create session "${session}":`, err);
+      return;
     }
   }
 
-  for (const project of config.projects) {
+  for (const project of server.projects) {
     if (tmuxWindowExists(session, project.name)) continue;
 
     try {
@@ -62,6 +63,12 @@ export function setupTmuxWindows(config: Config): void {
     } catch (err) {
       console.error(`[discord-bridge] Failed to create window "${project.name}":`, err);
     }
+  }
+}
+
+export function setupTmuxWindows(config: Config): void {
+  for (const server of config.servers) {
+    setupTmuxWindowsForServer(server);
   }
 }
 
@@ -96,11 +103,17 @@ export function isNodeProcess(pid: number): boolean {
 
 async function runDaemon(): Promise<void> {
   const config = loadConfig();
+  warnDuplicateChannels(config);
   setupTmuxWindows(config);
-  const client: Client = await startBot(config);
+
+  const clients: Client[] = [];
+  for (const server of config.servers) {
+    const client = await startServerBot(server);
+    clients.push(client);
+  }
 
   const shutdown = () => {
-    client.destroy();
+    for (const client of clients) client.destroy();
     try { unlinkSync(PID_FILE); } catch { /* ignore */ }
     process.exit(0);
   };

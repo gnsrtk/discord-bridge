@@ -19,7 +19,8 @@ vi.mock('../src/config.js', () => ({
 }));
 
 vi.mock('../src/bot.js', () => ({
-  startBot: vi.fn(),
+  startServerBot: vi.fn(),
+  warnDuplicateChannels: vi.fn(),
 }));
 
 // process.exit をモックしてトップレベルの runCli() default ブランチを無害化
@@ -36,19 +37,19 @@ import {
   readPid,
   isProcessRunning,
 } from '../cli/index.js';
-import type { Config } from '../src/config.js';
+import type { Config, Server } from '../src/config.js';
 
 const mockExecFileSync = vi.mocked(execFileSync);
 const mockReadFileSync = vi.mocked(readFileSync);
 
-const makeConfig = (overrides: Partial<Config> = {}): Config => ({
-  schemaVersion: 1,
-  tmux: { session: 'test-session' },
+const makeServer = (overrides: Partial<Server> = {}): Server => ({
+  name: 'personal',
   discord: {
     botToken: 'Bot.token',
     guildId: '111',
     ownerUserId: '222',
   },
+  tmux: { session: 'test-session' },
   projects: [
     {
       name: 'project-a',
@@ -57,6 +58,12 @@ const makeConfig = (overrides: Partial<Config> = {}): Config => ({
       model: 'claude-opus-4-6',
     },
   ],
+  ...overrides,
+});
+
+const makeConfig = (overrides: Partial<Config> = {}): Config => ({
+  schemaVersion: 2,
+  servers: [makeServer()],
   ...overrides,
 });
 
@@ -162,6 +169,38 @@ describe('setupTmuxWindows', () => {
       (c) => c[0] === 'tmux' && Array.isArray(c[1]) && c[1][0] === 'new-window',
     );
     expect(newWindowCall).toBeUndefined();
+  });
+
+  it('複数サーバーの場合、各サーバーのセッションが処理される', () => {
+    mockExecFileSync
+      .mockReturnValueOnce(Buffer.from(''))  // has-session (personal)
+      .mockReturnValueOnce('project-a\n')    // list-windows (personal)
+      .mockReturnValueOnce(Buffer.from(''))  // has-session (work)
+      .mockReturnValueOnce('')               // list-windows (work)
+      .mockReturnValue(Buffer.from(''));     // new-window, send-keys
+
+    const config = makeConfig({
+      servers: [
+        makeServer(),
+        makeServer({
+          name: 'work',
+          tmux: { session: 'work-session' },
+          projects: [{ name: 'proj-b', channelId: '555', projectPath: '/projects/b', model: 'claude-sonnet-4-6' }],
+        }),
+      ],
+    });
+    setupTmuxWindows(config);
+
+    const calls = mockExecFileSync.mock.calls;
+    // personal のセッション確認
+    expect(calls[0]).toEqual(['tmux', ['has-session', '-t', 'test-session']]);
+    // work のセッション確認
+    expect(calls[2]).toEqual(['tmux', ['has-session', '-t', 'work-session']]);
+    // work の新しいウィンドウ
+    const newWindowCall = calls.find(
+      (c) => c[0] === 'tmux' && Array.isArray(c[1]) && c[1][0] === 'new-window' && c[1][2] === 'work-session:',
+    );
+    expect(newWindowCall).toBeDefined();
   });
 });
 
