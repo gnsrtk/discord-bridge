@@ -235,6 +235,15 @@ Discord button interactions are also supported.
 The `customId` content is sent directly to the Claude Code session
 (useful for Yes/No confirmations, etc.).
 
+#### Automatic Question Detection
+
+When Claude's response ends with a Japanese question pattern (e.g., "〜しますか？", "〜でしょうか？", "〜しましょうか？"),
+the Stop hook automatically converts the message into a **Yes / No / Other** 3-button message.
+
+- **Yes / No**: Clicking sends the selection directly to the Claude Code session
+- **Other**: Clicking displays "📝 回答を入力してください" (Please type your answer), and the next message you send will be forwarded to Claude Code
+- Messages with file attachments are not converted to buttons, even if they contain a question pattern
+
 ## Debugging
 
 Set `DISCORD_BRIDGE_DEBUG=1` to enable debug log output to the following files.
