@@ -11,22 +11,23 @@ Claude が応答を完了すると、結果が自動的に Discord へ返信さ�
 Discord (スマホ/PC)
        │  メッセージ送信
        ▼
-  Discord Bot (discord.js)
+  Discord Bot (discord.js)          ← サーバーごとに Bot インスタンスを起動
        │  テキスト / ファイル添付
        ▼
   TmuxSender
        │  tmux send-keys
        ▼
-  tmux ウィンドウ (プロジェクトごと)
+  tmux セッション:ウィンドウ         ← サーバーごとに tmux セッションを分離
        │  Claude Code が処理
        ▼
-  Claude Code Hooks (stop.py)
+  Claude Code Hooks (stop.py)       ← cwd から Bot トークン・チャンネルを自動解決
        │  Discord API POST
        ▼
 Discord チャンネルへ返信
 ```
 
-複数プロジェクトに対応しており、チャンネルとプロジェクトディレクトリを 1:1 でマッピングできます。
+複数サーバー・複数プロジェクトに対応しており、サーバーごとに Bot トークンと tmux セッションを分離できます。
+チャンネルとプロジェクトディレクトリは 1:1 でマッピングされ、cwd ベースの最長一致で自動解決します。
 
 ## 必要な環境
 
@@ -59,25 +60,30 @@ bash install.sh
 
 ## 設定
 
-`~/.discord-bridge/config.json` を作成します。
+`~/.discord-bridge/config.json` を作成します（schemaVersion 2）。
 
 ```json
 {
-  "schemaVersion": 1,
-  "tmux": {
-    "session": "discord-bridge"
-  },
-  "discord": {
-    "botToken": "Bot トークンをここに記入",
-    "guildId": "サーバー (Guild) ID",
-    "ownerUserId": "メッセージを受け付けるユーザーの Discord ID"
-  },
-  "projects": [
+  "schemaVersion": 2,
+  "servers": [
     {
-      "name": "my-project",
-      "channelId": "このプロジェクト専用チャンネルの ID",
-      "projectPath": "/path/to/my-project",
-      "model": "claude-sonnet-4-5"
+      "name": "personal",
+      "discord": {
+        "botToken": "Bot トークンをここに記入",
+        "guildId": "サーバー (Guild) ID",
+        "ownerUserId": "メッセージを受け付けるユーザーの Discord ID"
+      },
+      "tmux": {
+        "session": "discord-bridge"
+      },
+      "projects": [
+        {
+          "name": "my-project",
+          "channelId": "このプロジェクト専用チャンネルの ID",
+          "projectPath": "/path/to/my-project",
+          "model": "claude-sonnet-4-6"
+        }
+      ]
     }
   ]
 }
@@ -87,18 +93,31 @@ bash install.sh
 
 | フィールド | 説明 |
 | --- | --- |
-| `tmux.session` | tmux セッション名（`discord-bridge start` が自動作成） |
-| `discord.botToken` | Discord Bot トークン |
-| `discord.guildId` | Bot を招待したサーバーの ID（省略可） |
-| `discord.ownerUserId` | コマンドを受け付けるユーザー ID（セキュリティ上、1 人に絞ることを推奨） |
-| `projects[].name` | tmux ウィンドウ名 / 識別子 |
-| `projects[].channelId` | このプロジェクトに対応する Discord チャンネル ID |
-| `projects[].projectPath` | Claude Code を起動するディレクトリの絶対パス |
-| `projects[].model` | 使用する Claude モデル（例: `claude-sonnet-4-5`） |
+| `servers[].name` | サーバー識別子（ログ出力に使用） |
+| `servers[].discord.botToken` | Discord Bot トークン |
+| `servers[].discord.guildId` | Bot を招待したサーバーの ID（省略可） |
+| `servers[].discord.ownerUserId` | コマンドを受け付けるユーザー ID（セキュリティ上、1 人に絞ることを推奨） |
+| `servers[].tmux.session` | このサーバー用の tmux セッション名（`discord-bridge start` が自動作成） |
+| `servers[].projects[].name` | tmux ウィンドウ名 / 識別子 |
+| `servers[].projects[].channelId` | このプロジェクトに対応する Discord チャンネル ID |
+| `servers[].projects[].projectPath` | Claude Code を起動するディレクトリの絶対パス |
+| `servers[].projects[].model` | 使用する Claude モデル（例: `claude-sonnet-4-6`） |
 
-> **重要**: `projects` には最低 1 件のエントリが必要です。先頭のエントリ（`projects[0]`）は、cwd がどのプロジェクトにも一致しない場合のフォールバックチャンネルとして使われます。名前は自由に変更できますが、削除すると起動しません。
+> **重要**: `servers` には最低 1 件のエントリが必要です。各サーバーの `projects` にも最低 1 件必要です。`servers[0].projects[0]` は cwd がどのプロジェクトにも一致しない場合のフォールバックチャンネルとして使われます。
+
+> **複数サーバー**: `servers` 配列に複数のエントリを追加すると、それぞれ別の Bot トークン・tmux セッションで独立に動作します。同じチャンネル ID を複数サーバーで共有すると警告が表示されます。
 
 > **IDs の確認方法**: Discord の **設定 → 詳細設定 → 開発者モード** を有効にすると、右クリックメニューから各 ID をコピーできます。
+
+### v1 からの移行
+
+schemaVersion 1 の設定ファイルは `migrate_config.py` で v2 に変換できます。
+
+```bash
+python3 migrate_config.py
+```
+
+元のファイルは `~/.discord-bridge/config.json.bak` にバックアップされます。
 
 ## Claude Code Hooks のセットアップ
 
@@ -172,10 +191,10 @@ discord-bridge stop    # 停止
 
 `start` を実行すると以下が自動で行われます：
 
-1. 設定した名前の tmux セッションを作成（存在しない場合）
+1. 各サーバーの tmux セッションを作成（存在しない場合）
 2. 各プロジェクトの tmux ウィンドウを作成し、
    `cd <projectPath> && claude --model <model>` を実行（ウィンドウが既存の場合はスキップ）
-3. Discord Bot をバックグラウンドで起動し、各プロジェクトのチャンネルに `🟢 Bot 起動` を通知
+3. サーバーごとに Discord Bot を起動し、各プロジェクトのチャンネルに `🟢 Bot 起動` を通知
 4. PID を `~/.discord-bridge/discord-bridge.pid` に保存、
    ログを `~/.discord-bridge/discord-bridge.log` に書き出し
 
@@ -193,7 +212,7 @@ discord-bridge stop    # 停止
 
 1. Claude Code が処理を完了すると Stop フック（`stop.py`）が呼び出される
 2. hook input の `last_assistant_message` フィールドから最後のアシスタントメッセージを取得
-3. `cwd` と `projectPath` を照合して送信先チャンネルを決定
+3. `cwd` と各サーバーの `projectPath` を最長一致で照合し、送信先チャンネルと Bot トークンを決定
 4. Discord API へ POST（テキスト + ファイル添付対応）
 
 ### ファイル添付の送信（Claude → Discord）

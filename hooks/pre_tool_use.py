@@ -94,10 +94,8 @@ def main() -> None:
         print(f"[pre_tool_use.py] Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    bot_token = config["discord"]["botToken"]
-
     try:
-        channel_id, _ = resolve_channel(config, cwd)
+        channel_id, bot_token, _ = resolve_channel(config, cwd)
     except ValueError as e:
         print(f"[pre_tool_use.py] Error: {e}", file=sys.stderr)
         sys.exit(1)

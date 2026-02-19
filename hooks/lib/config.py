@@ -8,24 +8,37 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def resolve_channel(config: dict, cwd: str) -> tuple[str, str | None]:
-    """cwd から channel_id と project_name を解決する。
-    Returns: (channel_id, project_name) — project_name は一致なしの場合 None
+def resolve_channel(config: dict, cwd: str) -> tuple[str, str, str | None]:
+    """cwd から (channel_id, bot_token, project_name) を解決する。
+    servers[] をループし、projectPath × cwd で最長一致を選択。
+    不一致時は servers[0].projects[0] にフォールバック。
     """
-    channel_id = None
-    project_name = None
+    best_channel_id: str | None = None
+    best_bot_token: str | None = None
+    best_project_name: str | None = None
     best_match_len = 0
-    for project in config.get("projects", []):
-        pp = project.get("projectPath", "").rstrip("/")
-        if pp and (cwd == pp or cwd.startswith(pp + "/")) and len(pp) > best_match_len:
-            channel_id = project["channelId"]
-            project_name = project.get("name", "")
-            best_match_len = len(pp)
 
-    if not channel_id:
-        projects = config.get("projects", [])
-        if not projects:
-            raise ValueError("projects is empty in config.json")
-        channel_id = projects[0]["channelId"]
+    for server in config.get("servers", []):
+        bot_token = server.get("discord", {}).get("botToken", "")
+        for project in server.get("projects", []):
+            pp = project.get("projectPath", "").rstrip("/")
+            if pp and (cwd == pp or cwd.startswith(pp + "/")) and len(pp) > best_match_len:
+                best_channel_id = project["channelId"]
+                best_bot_token = bot_token
+                best_project_name = project.get("name")
+                best_match_len = len(pp)
 
-    return channel_id, project_name
+    if best_channel_id and best_bot_token:
+        return best_channel_id, best_bot_token, best_project_name
+
+    # フォールバック
+    servers = config.get("servers", [])
+    if not servers or not servers[0].get("projects"):
+        raise ValueError("servers is empty in config.json")
+    first_server = servers[0]
+    first_project = first_server["projects"][0]
+    return (
+        first_project["channelId"],
+        first_server["discord"]["botToken"],
+        None,
+    )

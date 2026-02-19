@@ -58,3 +58,6 @@
 | 37 | ✅ | AskUserQuestion 呼び出し前のアシスタントテキスト（比較表・説明など）が Discord に届かない。PreToolUse hook 発火時点では Stop hook は未発火のため | `hooks/pre_tool_use.py` | `lib/transcript.py` に共通化した `get_assistant_messages` を使い、直前テキストをボタンメッセージに付加するよう修正済み |
 | 38 | ✅ | 複数メッセージ連続送信時に Discord のレート制限（HTTP 429）で後続メッセージが欠落する | `hooks/stop.py` | `last_assistant_message` 移行（2026-02-19）で根本解決。Discord API 呼び出しが常に1件になりレート制限リスクがほぼゼロに。安全弁として `_send_request()` の 429 Retry-After リトライ（最大3回）は維持 |
 | 39 | ✅ | Bot 再起動直後に Stop hook が送信するメッセージが Discord に届かない（Stop が transcript 書き込み完了前に発火 or 🟢 起動通知と競合） | `hooks/stop.py` L196, `src/bot.ts` L144 | `last_assistant_message` 移行（2026-02-19）で根本解決。メッセージが hook input に直接入るため transcript 書き込みとの race condition がなくなった。ClientReady での🟢送信間の 1 秒 delay は維持 |
+| 40 | ✅ | config schemaVersion 1 ではサーバーが 1 つしか設定できず、複数 Discord サーバーを使い分けられない | `src/config.ts`, `hooks/lib/config.py` | schemaVersion 2 で `servers[]` 配列を導入。サーバーごとに Bot トークン・tmux セッション・プロジェクトを独立管理。`migrate_config.py` で v1 → v2 移行可能 |
+| 41 | ✅ | フック（stop/notify/pre_tool_use）が `config["discord"]["botToken"]` をハードコードで参照しており、マルチサーバー非対応 | 全フック | `resolve_channel()` が `(channel_id, bot_token, project_name)` の 3-tuple を返すよう変更。cwd から全サーバーの projects を横断して最長一致で Bot トークンを自動解決 |
+| 42 | ✅ | `setupTmuxWindowsForServer()` で tmux セッション作成に失敗した場合、存在しないセッションに対してウィンドウ作成を試みる | `cli/index.ts` | セッション作成失敗時に `return` で早期終了するよう修正 |

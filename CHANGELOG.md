@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- マルチサーバー・マルチセッション対応（config schemaVersion 2）
+  - `servers[]` 配列で複数 Discord サーバー（個別 Bot トークン）を定義可能に
+  - サーバーごとに tmux セッションを分離（`servers[].tmux.session`）
+  - サーバーごとに独立した Discord Bot インスタンスを起動
+  - 同じチャンネル ID を複数サーバーで共有した場合に警告を表示
+- `migrate_config.py`: schemaVersion 1 → 2 の設定ファイル移行スクリプト
+  （`.json.bak` バックアップ付き）
+
 ### Changed
 
+- `src/config.ts`: スキーマを v2 に移行。`ServerSchema`（name/discord/tmux/projects）を導入し
+  `ConfigSchema` を `{ schemaVersion: 2, servers: ServerSchema[] }` に変更
+- `src/bot.ts`: `createBot(config)` → `createServerBot(server)` に変更。
+  サーバー単位で Bot を生成・起動。`startServerBot(server)` / `warnDuplicateChannels(config)` を追加
+- `cli/index.ts`: `setupTmuxWindowsForServer(server)` を追加。
+  `runDaemon()` が複数 Client を管理し、全サーバーの Bot を一括 shutdown
+- `hooks/lib/config.py`: `resolve_channel()` の戻り値を `(channel_id, project_name)` →
+  `(channel_id, bot_token, project_name)` に変更。全サーバーの projects を横断して最長一致
+- `hooks/stop.py` / `hooks/notify.py` / `hooks/pre_tool_use.py`:
+  `config["discord"]["botToken"]` の直接参照を廃止し、`resolve_channel()` から Bot トークンを取得
 - `src/config.ts`: `discord.generalChannelId` を廃止。`projects[0]` の `channelId` をフォールバックとして使用するよう変更
 - `hooks/stop.py` / `hooks/pre_tool_use.py`: `discord.generalChannelId` 参照を削除し、`projects[0]["channelId"]` でフォールバック
 - `src/bot.ts`: `generalChannelId` を `listenChannelIds` から除去
@@ -18,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/bot.ts`: Discord ボタンインタラクション処理に try/catch を追加。
   tmux send-keys 失敗時でも Discord インタラクションを必ず acknowledge するよう変更。
   未対応だと「インタラクションに失敗しました」が表示されていた
+- `cli/index.ts`: tmux セッション作成失敗時に window 作成を試みないよう `return` を追加
 
 ### Security
 
@@ -43,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- `README.md`: マルチサーバー対応に合わせて全面改訂
+  （アーキテクチャ図・設定例・フィールド表・動作説明を v2 に更新）
+- `README.md`: v1 → v2 移行手順を追記
 - `README.md`: `hooks/pre_tool_use.py` の説明を実装に合わせて修正
   （破壊的操作通知 → AskUserQuestion のボタン変換） (closes #7)
 - `README.md`: config 例から削除済みの `projects[].order` フィールドを除去 (closes #7)

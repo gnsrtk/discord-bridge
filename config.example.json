@@ -1,25 +1,30 @@
 {
-  "schemaVersion": 1,
-  "tmux": {
-    "session": "discord-bridge"
-  },
-  "discord": {
-    "botToken": "YOUR_BOT_TOKEN",
-    "guildId": "YOUR_GUILD_ID",
-    "ownerUserId": "YOUR_USER_ID"
-  },
-  "projects": [
+  "schemaVersion": 2,
+  "servers": [
     {
-      "name": "global",
-      "channelId": "YOUR_CHANNEL_ID_FOR_GLOBAL",
-      "projectPath": "/path/to/home",
-      "model": "claude-sonnet-4-5"
-    },
-    {
-      "name": "my-project",
-      "channelId": "YOUR_CHANNEL_ID_FOR_MY_PROJECT",
-      "projectPath": "/path/to/my-project",
-      "model": "claude-sonnet-4-5"
+      "name": "personal",
+      "discord": {
+        "botToken": "YOUR_BOT_TOKEN",
+        "guildId": "YOUR_GUILD_ID",
+        "ownerUserId": "YOUR_USER_ID"
+      },
+      "tmux": {
+        "session": "discord-bridge"
+      },
+      "projects": [
+        {
+          "name": "global",
+          "channelId": "YOUR_CHANNEL_ID_FOR_GLOBAL",
+          "projectPath": "/path/to/home",
+          "model": "claude-sonnet-4-6"
+        },
+        {
+          "name": "my-project",
+          "channelId": "YOUR_CHANNEL_ID_FOR_MY_PROJECT",
+          "projectPath": "/path/to/my-project",
+          "model": "claude-sonnet-4-6"
+        }
+      ]
     }
   ]
 }
