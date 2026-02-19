@@ -6,7 +6,7 @@ import {
   type ButtonInteraction,
 } from 'discord.js';
 import { mkdir, writeFile, readdir, stat, unlink } from 'node:fs/promises';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { type Config, type Server } from './config.js';
 import { TmuxSender } from './tmux-sender.js';
@@ -14,6 +14,18 @@ import { TmuxSender } from './tmux-sender.js';
 const UPLOAD_DIR = '/tmp/discord-uploads';
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+const THREAD_TRACKING_DIR = '/tmp';
+
+export function writeThreadTracking(parentChannelId: string, threadId: string | null): void {
+  const filePath = join(THREAD_TRACKING_DIR, `discord-bridge-thread-${parentChannelId}.json`);
+  if (threadId) {
+    writeFileSync(filePath, JSON.stringify({ threadId }));
+  } else {
+    try {
+      unlinkSync(filePath);
+    } catch { /* ignore if file doesn't exist */ }
+  }
+}
 
 export function buildMessageWithAttachments(content: string, paths: string[]): string {
   if (paths.length === 0) return content;
@@ -66,11 +78,28 @@ export async function downloadAttachment(url: string, name: string): Promise<str
   }
 }
 
+export function resolveParentChannel(
+  channelId: string,
+  channelSenderMap: Map<string, TmuxSender>,
+  threadParentMap?: Map<string, string>,
+  channel?: { isThread(): boolean; parentId?: string | null } | null,
+): string {
+  if (channelSenderMap.has(channelId)) return channelId;
+  const fromMap = threadParentMap?.get(channelId);
+  if (fromMap) return fromMap;
+  // Bot 再起動後 threadParentMap が消失しても channel オブジェクトから解決
+  if (channel?.isThread() && channel.parentId && channelSenderMap.has(channel.parentId)) {
+    return channel.parentId;
+  }
+  return channelId;
+}
+
 export async function handleInteractionCreate(
   interaction: { isButton(): boolean },
   ownerUserId: string,
   channelSenderMap: Map<string, TmuxSender>,
   defaultSender: TmuxSender,
+  threadParentMap?: Map<string, string>,
 ): Promise<void> {
   if (!interaction.isButton()) return;
   const btn = interaction as ButtonInteraction;
@@ -90,8 +119,11 @@ export async function handleInteractionCreate(
     // channelId はDiscord Snowflake (数字のみ) であるべき
     if (!/^\d+$/.test(btn.channelId)) return;
 
+    // スレッド内ボタンの場合、親チャンネルIDを解決
+    const resolvedChannelId = resolveParentChannel(btn.channelId, channelSenderMap, threadParentMap, btn.channel);
+
     const action = btn.customId.slice(5); // "allow" | "deny" | "other"
-    const respPath = `/tmp/discord-bridge-perm-${btn.channelId}.json`;
+    const respPath = `/tmp/discord-bridge-perm-${resolvedChannelId}.json`;
 
     if (action === 'other') {
       try {
@@ -120,9 +152,10 @@ export async function handleInteractionCreate(
     } catch { /* ignore */ }
     return;
   }
+  const resolvedBtnChannelId = resolveParentChannel(btn.channelId, channelSenderMap, threadParentMap, btn.channel);
   let sent = false;
   try {
-    handleButtonInteraction(btn.channelId, btn.customId, channelSenderMap, defaultSender);
+    handleButtonInteraction(resolvedBtnChannelId, btn.customId, channelSenderMap, defaultSender);
     sent = true;
   } catch (err) {
     console.error('[discord-bridge] Failed to handle button interaction:', err);
@@ -182,6 +215,7 @@ export function createServerBot(server: Server): Client {
   }
 
   const listenChannelIds = new Set(server.projects.map((p) => p.channelId));
+  const threadParentMap = new Map<string, string>(); // threadId → parentChannelId
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`[discord-bridge] Bot ready: ${c.user.tag}`);
@@ -203,8 +237,19 @@ export function createServerBot(server: Server): Client {
   client.on(Events.MessageCreate, async (msg: Message) => {
     if (msg.author.bot) return;
     if (msg.author.id !== server.discord.ownerUserId) return;
-    if (!listenChannelIds.has(msg.channelId)) return;
-    const sender = channelSenderMap.get(msg.channelId) ?? defaultSender;
+
+    let parentChannelId: string;
+    if (listenChannelIds.has(msg.channelId)) {
+      parentChannelId = msg.channelId;
+      writeThreadTracking(parentChannelId, null); // 親チャンネルに戻った
+    } else if (msg.channel.isThread() && msg.channel.parentId && listenChannelIds.has(msg.channel.parentId)) {
+      parentChannelId = msg.channel.parentId;
+      writeThreadTracking(parentChannelId, msg.channelId); // スレッドを追跡
+      threadParentMap.set(msg.channelId, parentChannelId);
+    } else {
+      return;
+    }
+    const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
 
     const trySend = (text: string): void => {
       try {
@@ -233,7 +278,7 @@ export function createServerBot(server: Server): Client {
   });
 
   client.on(Events.InteractionCreate, (interaction) =>
-    handleInteractionCreate(interaction, server.discord.ownerUserId, channelSenderMap, defaultSender),
+    handleInteractionCreate(interaction, server.discord.ownerUserId, channelSenderMap, defaultSender, threadParentMap),
   );
 
   return client;

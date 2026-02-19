@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import load_config, resolve_channel
+from lib.thread import resolve_target_channel, clear_thread_tracking
 from lib.transcript import get_assistant_messages
 
 DISCORD_MAX_CONTENT = 1900  # Discord の 2000 文字制限に余裕をもたせた上限
@@ -157,6 +158,8 @@ def main() -> None:
         print(f"[pre_tool_use.py] Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    target_channel = resolve_target_channel(channel_id)
+
     # AskUserQuestion 処理
     if tool_name == "AskUserQuestion":
         questions = tool_input.get("questions", [])
@@ -181,7 +184,18 @@ def main() -> None:
             sys.exit(0)
 
         try:
-            post_buttons(bot_token, channel_id, content, components)
+            post_buttons(bot_token, target_channel, content, components)
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and target_channel != channel_id:
+                clear_thread_tracking(channel_id)
+                try:
+                    post_buttons(bot_token, channel_id, content, components)
+                except urllib.error.URLError as e2:
+                    print(f"[pre_tool_use.py] Fallback API request failed: {e2}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(f"[pre_tool_use.py] API request failed: {e}", file=sys.stderr)
+                sys.exit(1)
         except urllib.error.URLError as e:
             print(f"[pre_tool_use.py] API request failed: {e}", file=sys.stderr)
             sys.exit(1)
@@ -198,11 +212,22 @@ def main() -> None:
         content = f"\U0001f510 ツール許可確認\n{info}"
 
         try:
-            post_permission_buttons(bot_token, channel_id, content)
+            post_permission_buttons(bot_token, target_channel, content)
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and target_channel != channel_id:
+                clear_thread_tracking(channel_id)
+                try:
+                    post_permission_buttons(bot_token, channel_id, content)
+                except urllib.error.URLError:
+                    sys.exit(0)
+            else:
+                print(f"[pre_tool_use.py] API request failed: {e}", file=sys.stderr)
+                sys.exit(0)
         except urllib.error.URLError as e:
             print(f"[pre_tool_use.py] API request failed: {e}", file=sys.stderr)
             sys.exit(0)  # 送信失敗時は Claude Code デフォルトに委ねる
 
+        # IPC ファイルは親チャンネルIDベース（bot.ts が threadParentMap で親IDに解決するため）
         result = wait_for_permission(channel_id)
         if result is None:
             sys.exit(0)  # タイムアウト → Claude Code デフォルト

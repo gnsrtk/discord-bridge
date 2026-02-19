@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest.mock as mock
+import urllib.error
 import uuid
 from pathlib import Path
 
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 import stop  # noqa: E402  (パス追加後のインポートのため)
 import pre_tool_use  # noqa: E402
 from lib.config import resolve_channel  # noqa: E402
+from lib.thread import get_thread_id, resolve_target_channel, clear_thread_tracking  # noqa: E402
 from lib.transcript import get_assistant_messages  # noqa: E402
 
 
@@ -712,3 +714,128 @@ class TestPreToolUsePermission:
             with pytest.raises(SystemExit) as exc_info:
                 pre_tool_use.main()
         assert exc_info.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# lib/thread.py — スレッドトラッキング
+# ---------------------------------------------------------------------------
+
+class TestThreadTracking:
+    def test_file_present_returns_thread_id(self, tmp_path):
+        """トラッキングファイルがあれば threadId を返す。"""
+        channel_id = "test-thread-001"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": "thread-999"}))
+        try:
+            result = get_thread_id(channel_id)
+            assert result == "thread-999"
+        finally:
+            tracking_file.unlink(missing_ok=True)
+
+    def test_file_absent_returns_none(self):
+        """トラッキングファイルがなければ None を返す。"""
+        result = get_thread_id("nonexistent-channel-xyz")
+        assert result is None
+
+    def test_invalid_json_returns_none(self, tmp_path):
+        """不正 JSON の場合は None を返す。"""
+        channel_id = "test-thread-bad-json"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text("not valid json{{{")
+        try:
+            result = get_thread_id(channel_id)
+            assert result is None
+        finally:
+            tracking_file.unlink(missing_ok=True)
+
+    def test_resolve_target_channel_with_thread(self):
+        """スレッドトラッキングあり → スレッドID を返す。"""
+        channel_id = "test-resolve-001"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": "thread-123"}))
+        try:
+            result = resolve_target_channel(channel_id)
+            assert result == "thread-123"
+        finally:
+            tracking_file.unlink(missing_ok=True)
+
+    def test_resolve_target_channel_without_thread(self):
+        """スレッドトラッキングなし → channel_id をそのまま返す。"""
+        result = resolve_target_channel("no-thread-channel-xyz")
+        assert result == "no-thread-channel-xyz"
+
+
+# ---------------------------------------------------------------------------
+# stop.main with thread (スレッド対応)
+# ---------------------------------------------------------------------------
+
+class TestStopMainWithThread:
+    def _make_hook_input(self, message: str) -> dict:
+        return {
+            "session_id": str(uuid.uuid4()),
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": message,
+        }
+
+    def _mock_config(self):
+        return {"schemaVersion": 2, "servers": []}
+
+    def test_thread_active_sends_to_thread(self):
+        """スレッドアクティブ時 → スレッドに送信する。"""
+        channel_id = "test-stop-thread-ch"
+        thread_id = "test-stop-thread-999"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": thread_id}))
+
+        hook_input = self._make_hook_input("完了しました。")
+        try:
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+                 mock.patch("stop.load_config", return_value=self._mock_config()), \
+                 mock.patch("stop.resolve_channel", return_value=(channel_id, "token-xxx", "test-project", [])), \
+                 mock.patch("stop.post_message") as mock_post:
+                stop.main()
+            mock_post.assert_called_once()
+            # 送信先がスレッドIDであることを確認
+            assert mock_post.call_args[0][1] == thread_id
+        finally:
+            tracking_file.unlink(missing_ok=True)
+
+    def test_thread_404_falls_back_to_parent(self):
+        """スレッドが 404 → 親チャンネルにフォールバックする。"""
+        channel_id = "test-fallback-ch"
+        thread_id = "test-fallback-thread-404"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": thread_id}))
+
+        hook_input = self._make_hook_input("完了しました。")
+
+        http_404 = urllib.error.HTTPError(
+            url="https://discord.com/api/...",
+            code=404,
+            msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+        call_count = 0
+
+        def side_effect(token, ch, text):
+            nonlocal call_count
+            call_count += 1
+            if ch == thread_id:
+                raise http_404
+
+        try:
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+                 mock.patch("stop.load_config", return_value=self._mock_config()), \
+                 mock.patch("stop.resolve_channel", return_value=(channel_id, "token-xxx", "test-project", [])), \
+                 mock.patch("stop.post_message", side_effect=side_effect) as mock_post:
+                stop.main()
+            # 2回呼ばれる: 1回目スレッド(404) → 2回目親チャンネル
+            assert call_count == 2
+            assert mock_post.call_args_list[1][0][1] == channel_id
+            # トラッキングファイルが削除されている
+            assert not tracking_file.exists()
+        finally:
+            tracking_file.unlink(missing_ok=True)

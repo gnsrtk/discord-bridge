@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import load_config, resolve_channel
+from lib.thread import resolve_target_channel, clear_thread_tracking
 from lib.transcript import get_assistant_messages
 
 DEBUG = os.environ.get("DISCORD_BRIDGE_DEBUG") == "1"
@@ -258,7 +259,8 @@ def main() -> None:
         print(f"[stop.py] Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    _dbg(f"cwd: {cwd!r} -> channel_id: {channel_id} project: {project_name!r}")
+    target_channel = resolve_target_channel(channel_id)
+    _dbg(f"cwd: {cwd!r} -> channel_id: {channel_id} target: {target_channel} project: {project_name!r}")
 
     # タイトル: プロジェクト一致なら "✅ Claude 完了"、general フォールバックなら cwd を付記
     if project_name:
@@ -272,12 +274,30 @@ def main() -> None:
     _dbg(f"sending: text={display_text[:40]!r} attach={len(attach_paths)}")
     try:
         if attach_paths:
-            post_message_with_files(bot_token, channel_id, display_text, attach_paths)
+            post_message_with_files(bot_token, target_channel, display_text, attach_paths)
         elif is_question(clean_message):
-            post_message_with_buttons(bot_token, channel_id, display_text)
+            post_message_with_buttons(bot_token, target_channel, display_text)
         else:
-            post_message(bot_token, channel_id, display_text)
+            post_message(bot_token, target_channel, display_text)
         _dbg("sent OK")
+    except urllib.error.HTTPError as e:
+        if e.code == 404 and target_channel != channel_id:
+            _dbg(f"thread 404, falling back to parent channel {channel_id}")
+            clear_thread_tracking(channel_id)
+            try:
+                if attach_paths:
+                    post_message_with_files(bot_token, channel_id, display_text, attach_paths)
+                elif is_question(clean_message):
+                    post_message_with_buttons(bot_token, channel_id, display_text)
+                else:
+                    post_message(bot_token, channel_id, display_text)
+                _dbg("fallback sent OK")
+            except urllib.error.URLError as e2:
+                print(f"[stop.py] Fallback API request failed: {e2}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(f"[stop.py] API request failed: {e}", file=sys.stderr)
+            sys.exit(1)
     except urllib.error.URLError as e:
         print(f"[stop.py] API request failed: {e}", file=sys.stderr)
         sys.exit(1)

@@ -246,6 +246,16 @@ When a tool listed in `permissionTools` (e.g., `Bash`) is about to execute, Disc
 - **Other**: Displays "📝 理由を入力してください" (Please enter your reason), and the next message can provide a reason
 - If no response within 120 seconds, Claude Code's default behavior applies
 
+#### Thread Support
+
+Messages can be sent and received from threads under monitored channels.
+
+- When you send a message from a thread, it becomes the "active thread" for that channel
+- Claude's responses are sent to the active thread
+- Sending a message in the parent channel clears the active thread, and subsequent responses go to the parent channel
+- If multiple threads are used in the same channel, the most recently messaged thread takes priority
+- If a thread is archived or deleted, responses automatically fall back to the parent channel
+
 #### Automatic Question Detection
 
 When Claude's response ends with a Japanese question pattern (e.g., "〜しますか？", "〜でしょうか？", "〜しましょうか？"),
