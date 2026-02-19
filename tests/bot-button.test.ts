@@ -85,4 +85,20 @@ describe('handleInteractionCreate', () => {
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
     expect(btn.reply).toHaveBeenCalledWith({ content: 'Unauthorized', ephemeral: true });
   });
+
+  test('__other__ ボタンは tmux に送信せず案内リプライを返す', async () => {
+    const btn = makeBtn({ customId: '__other__' });
+    await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
+    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 回答を入力してください', ephemeral: false });
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+  });
+
+  test('__other__ ボタンの reply 失敗時もエラーを伝播しない', async () => {
+    const btn = makeBtn({
+      customId: '__other__',
+      reply: vi.fn().mockRejectedValue(new Error('interaction expired')),
+    });
+    await expect(handleInteractionCreate(btn, 'owner-123', map, defaultSender)).resolves.toBeUndefined();
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+  });
 });

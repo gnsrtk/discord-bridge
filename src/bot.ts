@@ -77,6 +77,12 @@ export async function handleInteractionCreate(
     await btn.reply({ content: 'Unauthorized', ephemeral: true });
     return;
   }
+  if (btn.customId === '__other__') {
+    try {
+      await btn.reply({ content: '📝 回答を入力してください', ephemeral: false });
+    } catch { /* ignore */ }
+    return;
+  }
   let sent = false;
   try {
     handleButtonInteraction(btn.channelId, btn.customId, channelSenderMap, defaultSender);
