@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import load_config, resolve_channel
+from lib.thread import resolve_target_channel
 
 DEBUG = os.environ.get("DISCORD_BRIDGE_DEBUG") == "1"
 
@@ -75,8 +76,10 @@ def main() -> None:
     if notification_type:
         title += f" [{notification_type}]"
 
+    target_channel = resolve_target_channel(channel_id)
+
     try:
-        post_message(bot_token, channel_id, f"{title}\n{message or '(no message)'}")
+        post_message(bot_token, target_channel, f"{title}\n{message or '(no message)'}")
     except urllib.error.URLError as e:
         print(f"[notify.py] API request failed: {e}", file=sys.stderr)
         sys.exit(1)
