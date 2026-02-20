@@ -60,14 +60,14 @@ describe('handleInteractionCreate', () => {
   test('tmux 送信成功時は ✅ を返す', async () => {
     const btn = makeBtn();
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ 選択: yes', ephemeral: true });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ Selected: yes', ephemeral: true });
   });
 
   test('tmux 送信失敗時でも ❌ でインタラクションを acknowledge する', async () => {
     vi.mocked(execFileSync).mockImplementation(() => { throw new Error('tmux not found'); });
     const btn = makeBtn();
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ 送信に失敗しました', ephemeral: true });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ Failed to send', ephemeral: true });
   });
 
   test('btn.reply が失敗してもエラーを伝播しない', async () => {
@@ -90,7 +90,7 @@ describe('handleInteractionCreate', () => {
   test('__other__ ボタンは tmux に送信せず案内リプライを返す', async () => {
     const btn = makeBtn({ customId: '__other__' });
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 回答を入力してください', ephemeral: false });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 Please enter your answer', ephemeral: false });
     expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
   });
 
@@ -111,7 +111,7 @@ describe('handleInteractionCreate', () => {
 
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
 
-    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ 許可しました', ephemeral: false });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ Allowed', ephemeral: false });
     expect(existsSync(respPath)).toBe(true);
     const data = JSON.parse(readFileSync(respPath, 'utf-8'));
     expect(data.decision).toBe('allow');
@@ -127,7 +127,7 @@ describe('handleInteractionCreate', () => {
 
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
 
-    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ 拒否しました', ephemeral: false });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ Denied', ephemeral: false });
     expect(existsSync(respPath)).toBe(true);
     const data = JSON.parse(readFileSync(respPath, 'utf-8'));
     expect(data.decision).toBe('deny');
@@ -143,7 +143,7 @@ describe('handleInteractionCreate', () => {
 
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
 
-    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 理由を入力してください', ephemeral: false });
+    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 Please enter your reason', ephemeral: false });
     expect(existsSync(respPath)).toBe(true);
     const data = JSON.parse(readFileSync(respPath, 'utf-8'));
     expect(data.decision).toBe('block');

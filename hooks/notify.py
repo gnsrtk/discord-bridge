@@ -62,24 +62,16 @@ def main() -> None:
     cwd = hook_input.get("cwd", "")
 
     try:
-        channel_id, bot_token, project_name, _ = resolve_channel(config, cwd)
+        channel_id, bot_token, _, _ = resolve_channel(config, cwd)
     except ValueError as e:
         print(f"[notify.py] Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if project_name:
-        title = "⚠️ Claude 確認待ち"
-    else:
-        cwd_label = Path(cwd).name if cwd else "unknown"
-        title = f"⚠️ Claude 確認待ち [{cwd_label}]"
-
-    if notification_type:
-        title += f" [{notification_type}]"
-
     target_channel = resolve_target_channel(channel_id)
+    content = message or "(no message)"
 
     try:
-        post_message(bot_token, target_channel, f"{title}\n{message or '(no message)'}")
+        post_message(bot_token, target_channel, content)
     except urllib.error.URLError as e:
         print(f"[notify.py] API request failed: {e}", file=sys.stderr)
         sys.exit(1)

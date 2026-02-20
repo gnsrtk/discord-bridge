@@ -1,3 +1,5 @@
+[English](README_en.md)
+
 # discord-bridge
 
 Discord チャンネルと tmux ウィンドウ上の Claude Code セッションをブリッジする CLI ツールです。
@@ -5,29 +7,17 @@ Discord チャンネルと tmux ウィンドウ上の Claude Code セッショ�
 Discord にメッセージを送ると、対応する tmux ウィンドウの Claude Code へそのまま転送されます。
 Claude が応答を完了すると、結果が自動的に Discord へ返信されます。
 
-## アーキテクチャ
+## 主な機能
 
-```text
-Discord (スマホ/PC)
-       │  メッセージ送信
-       ▼
-  Discord Bot (discord.js)          ← サーバーごとに Bot インスタンスを起動
-       │  テキスト / ファイル添付
-       ▼
-  TmuxSender
-       │  tmux send-keys
-       ▼
-  tmux セッション:ウィンドウ         ← サーバーごとに tmux セッションを分離
-       │  Claude Code が処理
-       ▼
-  Claude Code Hooks (stop.py)       ← cwd から Bot トークン・チャンネルを自動解決
-       │  Discord API POST
-       ▼
-Discord チャンネルへ返信
-```
+- **双方向メッセージリレー** — Discord ↔ tmux 上の Claude Code をリアルタイム中継
+- **マルチサーバー / マルチプロジェクト** — サーバーごとに Bot トークン・tmux セッションを分離
+- **ファイル添付** — Discord からの画像・ファイルを Claude に渡す / Claude の出力をDiscordにアップロード
+- **スレッド対応** — スレッドごとに独立した Claude Code セッション（tmux ペイン）を自動起動
+- **ボタン操作** — `AskUserQuestion` ツールを自動検出して Discord のボタンに変換（CLAUDE.md での使用推奨を推奨）
+- **ツール許可確認** — `Bash` 等の実行前に Discord で許可/拒否を選択可能
+- **途中経過通知** — ツール実行前に Claude の思考テキストを `🔄` 付きでリアルタイム転送
 
-複数サーバー・複数プロジェクトに対応しており、サーバーごとに Bot トークンと tmux セッションを分離できます。
-チャンネルとプロジェクトディレクトリは 1:1 でマッピングされ、cwd ベースの最長一致で自動解決します。
+> 詳細な動作の仕組みは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
 
 ## 必要な環境
 
@@ -81,7 +71,11 @@ bash install.sh
           "name": "my-project",
           "channelId": "このプロジェクト専用チャンネルの ID",
           "projectPath": "/path/to/my-project",
-          "model": "claude-sonnet-4-6"
+          "model": "claude-sonnet-4-6",
+          "thread": {
+            "model": "claude-sonnet-4-6",
+            "permission": "bypassPermissions"
+          }
         }
       ],
       "permissionTools": ["Bash"]
@@ -103,6 +97,8 @@ bash install.sh
 | `servers[].projects[].channelId` | このプロジェクトに対応する Discord チャンネル ID |
 | `servers[].projects[].projectPath` | Claude Code を起動するディレクトリの絶対パス |
 | `servers[].projects[].model` | 使用する Claude モデル（例: `claude-sonnet-4-6`） |
+| `servers[].projects[].thread.model` | スレッド用ペインで使用するモデル（省略時は `model` を継承） |
+| `servers[].projects[].thread.permission` | スレッド用ペインの権限モード。`bypassPermissions` を指定すると `--dangerously-skip-permissions` 付きで起動（省略時はデフォルト権限） |
 | `servers[].permissionTools` | ツール実行前に Discord で許可確認を行うツール名のリスト（例: `["Bash"]`）。省略時は空 |
 
 > **重要**: `servers` には最低 1 件のエントリが必要です。各サーバーの `projects` にも最低 1 件必要です。`servers[0].projects[0]` は cwd がどのプロジェクトにも一致しない場合のフォールバックチャンネルとして使われます。
@@ -111,19 +107,9 @@ bash install.sh
 
 > **IDs の確認方法**: Discord の **設定 → 詳細設定 → 開発者モード** を有効にすると、右クリックメニューから各 ID をコピーできます。
 
-### v1 からの移行
-
-schemaVersion 1 の設定ファイルは `migrate_config.py` で v2 に変換できます。
-
-```bash
-python3 migrate_config.py
-```
-
-元のファイルは `~/.discord-bridge/config.json.bak` にバックアップされます。
-
 ## Claude Code Hooks のセットアップ
 
-Discord との連携に必要な3つのフックを設定します。`.claude/settings.json` で設定する場合：
+Discord との連携に必要なフックを設定します（3イベント / 4コマンド）。`.claude/settings.json` で設定する場合：
 
 ```json
 {
@@ -157,6 +143,11 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
           {
             "type": "command",
             "command": "python3 /path/to/discord-bridge/hooks/pre_tool_use.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 /path/to/discord-bridge/hooks/pre_tool_progress.py",
+            "async": true
           }
         ]
       }
@@ -173,7 +164,10 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
 - Stop: python3 /path/to/discord-bridge/hooks/stop.py
 - Notification: python3 /path/to/discord-bridge/hooks/notify.py
 - PreToolUse: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
+- PreToolUse (async): python3 /path/to/discord-bridge/hooks/pre_tool_progress.py
 ```
+
+> **注意**: CLAUDE.md 形式では `async: true` を指定できません。途中経過通知を有効にするには `settings.json` での設定を推奨します。
 
 ### hooks の役割
 
@@ -182,6 +176,7 @@ Discord との連携に必要な3つのフックを設定します。`.claude/se
 | `hooks/stop.py` | Claude が応答完了 | Claude の最後の返答テキスト（`last_assistant_message`）を Discord へ送信 |
 | `hooks/notify.py` | Claude が通知を発火 | 重要な通知を Discord へ転送（`idle_prompt` は除外） |
 | `hooks/pre_tool_use.py` | ツール実行前 | AskUserQuestion を Discord のボタン付きメッセージに変換。`permissionTools` に設定されたツールの許可確認ボタンを表示 |
+| `hooks/pre_tool_progress.py` | ツール実行前（非同期） | Claude の途中テキストを `🔄` プレフィックス付きで Discord へ送信。送信コンテンツのハッシュで重複防止 |
 
 ## 使い方
 
@@ -200,72 +195,6 @@ discord-bridge stop    # 停止
 4. PID を `~/.discord-bridge/discord-bridge.pid` に保存、
    ログを `~/.discord-bridge/discord-bridge.log` に書き出し
 
-## 動作の仕組み
-
-### メッセージ転送（Discord → Claude Code）
-
-1. `ownerUserId` のユーザーが対象チャンネルにメッセージを投稿
-2. Bot がメッセージを受信し、チャンネル ID からプロジェクトを特定
-3. `tmux send-keys` でそのプロジェクトの Claude Code セッションへテキストを送信
-4. ファイル添付がある場合は `/tmp/discord-uploads/` にダウンロードして、パスを添えて送信
-   （タイムアウト: 30秒、最大サイズ: 50MB）
-
-### 返信（Claude Code → Discord）
-
-1. Claude Code が処理を完了すると Stop フック（`stop.py`）が呼び出される
-2. hook input の `last_assistant_message` フィールドから最後のアシスタントメッセージを取得
-3. `cwd` と各サーバーの `projectPath` を最長一致で照合し、送信先チャンネルと Bot トークンを決定
-4. Discord API へ POST（テキスト + ファイル添付対応）
-
-### ファイル添付の送信（Claude → Discord）
-
-Claude の応答に `[DISCORD_ATTACH: filename]` マーカーを含めると、
-`/tmp/discord-bridge-outputs/` 配下のファイルが Discord にアップロードされます。
-
-- アップロード可能なのは `/tmp/discord-bridge-outputs/` 以下のファイルのみです
-- マーカーにはファイル名またはサブディレクトリを含む相対パスで指定します
-- 許可ディレクトリ外を指すパスは無視され、添付は行われません
-
-```text
-画像を生成しました。
-
-[DISCORD_ATTACH: output.png]
-```
-
-### ボタン操作
-
-Discord のボタンインタラクションも受け付けます。
-`customId` の内容が Claude Code のセッションへそのまま送信されます
-（Yes/No 確認などに活用できます）。
-
-#### ツール実行の許可確認
-
-`permissionTools` に設定したツール（例: `Bash`）の実行前に、Discord で **許可 / 拒否 / それ以外** の3ボタンが表示されます。
-
-- **許可**（緑）: ツール実行を許可します
-- **拒否**（赤）: ツール実行を拒否します
-- **それ以外**: 「📝 理由を入力してください」と表示され、次のメッセージで理由を送信できます
-- 120秒以内に応答がない場合は Claude Code のデフォルト動作に委ねられます
-
-#### スレッド対応
-
-監視対象チャンネル配下のスレッドからもメッセージの送受信が可能です。
-
-- スレッドからメッセージを送ると、そのスレッドが「アクティブスレッド」として記録されます
-- Claude の応答はアクティブスレッドに返信されます
-- 親チャンネルにメッセージを送るとアクティブスレッドは解除され、以降の応答は親チャンネルに戻ります
-- 同一チャンネルで複数スレッドを使った場合は、最後にメッセージを送ったスレッドが優先されます
-- スレッドがアーカイブ/削除されている場合は親チャンネルに自動フォールバックします
-
-#### 質問パターンの自動検出
-
-Claude の応答末尾が「〜しますか？」「〜でしょうか？」「〜しましょうか？」のような質問パターンの場合、
-Stop hook が自動的に **はい / いいえ / それ以外** の3ボタン付きメッセージに変換します。
-
-- **はい / いいえ**: クリックすると選択内容が Claude Code セッションへ送信されます
-- **それ以外**: クリックすると「📝 回答を入力してください」と表示され、次に入力したメッセージが Claude Code へ送信されます
-- ファイル添付がある場合は、質問パターンでもボタン化されません
-
 ## デバッグ
 
 `DISCORD_BRIDGE_DEBUG=1` を設定すると、以下のファイルにデバッグログが書き出されます。
@@ -280,7 +209,7 @@ export DISCORD_BRIDGE_DEBUG=1
 
 | ファイル | 出力元 |
 | --- | --- |
-| `/tmp/discord-bridge-debug.txt` | `hooks/stop.py` |
+| `/tmp/discord-bridge-debug.txt` | `hooks/stop.py` / `hooks/pre_tool_progress.py`（`[progress]` プレフィックス） |
 | `/tmp/discord-bridge-notify-debug.txt` | `hooks/notify.py` |
 
 ## ライセンス

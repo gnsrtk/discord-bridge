@@ -22,7 +22,10 @@ def get_thread_id(channel_id: str) -> str | None:
 
 
 def resolve_target_channel(channel_id: str) -> str:
-    """アクティブスレッドがあればスレッドID、なければ channel_id を返す。"""
+    """環境変数 > トラッキングファイル > channel_id の優先順で解決。"""
+    env_thread = os.environ.get("DISCORD_BRIDGE_THREAD_ID")
+    if env_thread:
+        return env_thread
     thread_id = get_thread_id(channel_id)
     return thread_id if thread_id else channel_id
 

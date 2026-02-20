@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-02-20
+
+### Added
+
+- `hooks/pre_tool_progress.py`: 途中経過通知 — PreToolUse hook（非同期）として
+  ツール実行前に transcript から最新アシスタントテキストを取得し、`🔄` プレフィックス付きで
+  Discord へ送信。送信コンテンツの MD5 ハッシュで重複防止 (closes #50)
+- `src/config.ts`: `ThreadConfigSchema`（`model` / `permission`）を追加。
+  スレッドペインのモデルと権限モードをプロジェクトごとに個別設定可能に
+- `src/bot.ts`: `buildPermissionFlag()` を追加。`thread.permission` が
+  `bypassPermissions` の場合 `--dangerously-skip-permissions` 付きで起動
+- `CLAUDE.md`: エージェント向け指示ファイルを追加（AskUserQuestion 使用推奨）
+- `docs/ARCHITECTURE.md` / `docs/ARCHITECTURE_en.md`: 動作の仕組み・IPC ファイル・
+  スレッド対応・ボタン操作の解説を README から分離して新規作成
+
+### Changed
+
+- **i18n**: ハードコードされた日本語 UI 文字列をすべて英語に置換
+  - `hooks/stop.py`: `"✅ Claude 完了"` タイトルを削除、Claude の生出力をそのまま送信
+  - `hooks/notify.py`: `"⚠️ Claude 確認待ち"` タイトルを削除、通知メッセージをそのまま送信
+  - `hooks/pre_tool_use.py`: `許可/拒否/それ以外` → `Allow/Deny/Other`、
+    `🔑 ツール許可確認` → `🔑 Tool permission`
+  - `src/bot.ts`: ボタン応答・添付ラベル・エラーメッセージをすべて英語化、
+    `🟢 Bot 起動` → `🟢 discord-bridge started`
+- `src/bot.ts`: スレッドペイン作成時に `project.thread?.model` / `project.thread?.permission` を参照するよう変更
+- `src/bot.ts`: ペイン送信失敗時のフォールバックで `writeThreadTracking` を呼び出し、
+  hook の応答がスレッドに届くよう修正
+
+### Fixed
+
+- `src/tmux-sender.ts`: 複数行テキストを Discord から送ると bracketed paste 後の Enter が
+  ドロップされ Claude Code が入力待ちのまま止まる問題を修正。`send-keys -l` で
+  bracketed paste シーケンス送信後、100ms 待機してから Enter を送るよう変更 (closes #48)
+
+### Removed
+
+- `hooks/stop.py`: 日本語質問パターン自動検出（`QUESTION_PATTERN` / `BINARY_QUESTION_PATTERN` /
+  `is_question()` / `post_message_with_buttons()`）を完全削除。質問のボタン化は
+  `AskUserQuestion`（pre_tool_use.py）に一本化 (closes #49)
+- `docs/plans/` 配下の設計ドキュメント4件と `docs/session-2026-02-18.md` を削除
+
+### Documentation
+
+- `README.md` / `README_en.md`: フック数を「3イベント / 4コマンド」に修正、
+  `thread` 設定フィールド追記、CLAUDE.md 形式の例に `pre_tool_progress.py` を追加、
+  `AskUserQuestion` 使用推奨を追記
+- `docs/ARCHITECTURE.md` / `docs/ARCHITECTURE_en.md`: `AskUserQuestion`（推奨）セクション追加、
+  途中経過通知セクション追加、`thread.model` / `thread.permission` 説明追記
+
+## [1.6.0] - 2026-02-19
+
+### Added
+
+- スレッド対応 — 監視チャンネル配下のスレッドからメッセージの送受信に対応。
+  ファイルベース IPC（`/tmp/discord-bridge-thread-{parentChannelId}.json`）で
+  アクティブスレッドを追跡し、全 hook がスレッドに応答を返す。
+  スレッド 404 時は親チャンネルにフォールバック (closes #46)
+- スレッドごとの tmux ペイン自動作成 — `tmux split-window` でスレッドごとに
+  独立した Claude Code セッションを起動。`threadPaneMap` でスレッド→ペインのマッピングを管理。
+  `threadPaneCreating` Set でレース条件を防止。スレッドアーカイブ時にペインを自動終了 (closes #47)
+- `hooks/lib/thread.py` 新規作成: `get_thread_id()` / `resolve_target_channel()`
+- `src/bot.ts`: `createThreadPane()` / `killThreadPane()` / `writeThreadTracking()` を追加
+
+### Changed
+
+- `hooks/stop.py` / `hooks/notify.py` / `hooks/pre_tool_use.py`:
+  `resolve_target_channel()` を使用し、アクティブスレッドがあればスレッドに送信するよう変更
+- `src/bot.ts`: MessageCreate ハンドラでスレッドメッセージを認識
+  （`msg.channel.isThread()` + `parentId` チェック）
+
+## [1.5.0] - 2026-02-19
+
+### Fixed
+
+- `src/tmux-sender.ts`: 複数行テキスト（エラーログ等）を Discord から送ると
+  `send-keys -l` が改行を Enter として送信し、行ごとに分割入力される問題を修正。
+  複数行テキストは `tmux load-buffer` + `paste-buffer` で bracketed paste 送信に変更 (closes #45)
+
+## [1.4.0] - 2026-02-19
+
+### Added
+
+- ツール実行の許可確認 — `permissionTools` 設定で Bash 等の実行前に
+  Discord で許可/拒否/それ以外の3ボタンを表示。ファイルベース IPC
+  （`/tmp/discord-bridge-perm-{channelId}.json`）で Bot → hook 間の応答を受け渡し。
+  120秒タイムアウトで Claude Code デフォルト動作に委ねる (closes #44)
+- `src/config.ts`: `permissionTools` フィールドを追加
+- `hooks/pre_tool_use.py`: `permissionTools` に該当するツールの実行前にボタン送信・応答待機
+
+## [1.3.0] - 2026-02-19
+
+### Added
+
+- ~~質問パターン自動検出~~ (v1.7 で削除 — #49)
+- `src/bot.ts`: `__other__` ボタン押下時に tmux 注入をスキップし
+  「📝 回答を入力してください」とリプライ
+
+## [1.2.0] - 2026-02-19
+
 ### Added
 
 - マルチサーバー・マルチセッション対応（config schemaVersion 2）
@@ -16,63 +115,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 同じチャンネル ID を複数サーバーで共有した場合に警告を表示
 - `migrate_config.py`: schemaVersion 1 → 2 の設定ファイル移行スクリプト
   （`.json.bak` バックアップ付き）
+- `README_en.md`: 英語版 README を追加
 
 ### Changed
 
 - `src/config.ts`: スキーマを v2 に移行。`ServerSchema`（name/discord/tmux/projects）を導入し
   `ConfigSchema` を `{ schemaVersion: 2, servers: ServerSchema[] }` に変更
 - `src/bot.ts`: `createBot(config)` → `createServerBot(server)` に変更。
-  サーバー単位で Bot を生成・起動。`startServerBot(server)` / `warnDuplicateChannels(config)` を追加
+  サーバー単位で Bot を生成・起動
 - `cli/index.ts`: `setupTmuxWindowsForServer(server)` を追加。
   `runDaemon()` が複数 Client を管理し、全サーバーの Bot を一括 shutdown
 - `hooks/lib/config.py`: `resolve_channel()` の戻り値を `(channel_id, project_name)` →
   `(channel_id, bot_token, project_name)` に変更。全サーバーの projects を横断して最長一致
 - `hooks/stop.py` / `hooks/notify.py` / `hooks/pre_tool_use.py`:
-  `config["discord"]["botToken"]` の直接参照を廃止し、`resolve_channel()` から Bot トークンを取得
-- `src/config.ts`: `discord.generalChannelId` を廃止。`projects[0]` の `channelId` をフォールバックとして使用するよう変更
-- `hooks/stop.py` / `hooks/pre_tool_use.py`: `discord.generalChannelId` 参照を削除し、`projects[0]["channelId"]` でフォールバック
-- `src/bot.ts`: `generalChannelId` を `listenChannelIds` から除去
+  `resolve_channel()` から Bot トークンを取得するよう変更
+- `src/config.ts`: `discord.generalChannelId` を廃止。`projects[0].channelId` でフォールバック
 
 ### Fixed
 
 - `src/bot.ts`: Discord ボタンインタラクション処理に try/catch を追加。
-  tmux send-keys 失敗時でも Discord インタラクションを必ず acknowledge するよう変更。
-  未対応だと「インタラクションに失敗しました」が表示されていた
+  tmux send-keys 失敗時でも Discord インタラクションを必ず acknowledge するよう変更
 - `cli/index.ts`: tmux セッション作成失敗時に window 作成を試みないよう `return` を追加
+- `cli/index.ts`: `~/.discord-bridge/` 不在時の ENOENT を修正（`mkdirSync` 追加）(closes #3)
+- `src/bot.ts`: 添付ダウンロード失敗時の unhandled rejection を修正 (closes #4)
+- `src/bot.ts`: `downloadAttachment()` にタイムアウト（30秒）と最大サイズ制限（50MB）を追加 (closes #4)
+- `src/bot.ts`: 到達不能な channel warn 分岐を削除、ファイル名衝突を防止 (closes #5)
+- `hooks/notify.py`: デバッグログが常時書き込まれる問題を修正 (closes #6)
 
 ### Security
 
 - `hooks/stop.py`: `[DISCORD_ATTACH]` マーカーのパス検証を強化。
-  許可ディレクトリ (`/tmp/discord-bridge-outputs/`) 配下のファイルのみアップロード可能にし、
-  それ以外のパスは無視するよう変更 (closes #2)
-
-### Fixed
-
-- `cli/index.ts`: `discord-bridge start` 実行時に `~/.discord-bridge/` が存在しない場合、
-  `openSync`/`writeFileSync` が ENOENT で失敗する問題を修正。
-  `mkdirSync(CONFIG_DIR, { recursive: true })` を追加 (closes #3)
-- `src/bot.ts`: Discord からの添付ファイルダウンロード失敗時に unhandled rejection が
-  発生する問題を修正。try/catch を追加し、失敗時は Discord へエラー返信して
-  メッセージ本文のみ Claude Code へ転送するよう変更 (closes #4)
-- `src/bot.ts`: `downloadAttachment()` にタイムアウト（30秒）と最大サイズ制限（50MB）を追加。
-  巨大ファイルや応答ハングでボットが固まる問題を防止 (closes #4)
-- `src/bot.ts`: 到達不能だった channel warn 分岐を削除 (closes #5)
-- `src/bot.ts`: ダウンロードファイル名に `Math.random()` ベースのユニーク ID を追加し、
-  同一ミリ秒内の同名ファイル衝突を防止 (closes #5)
-- `hooks/notify.py`: デバッグログ (`/tmp/discord-bridge-notify-debug.txt`) が
-  `DISCORD_BRIDGE_DEBUG` フラグなしで常時書き込まれる問題を修正 (closes #6)
+  許可ディレクトリ配下のファイルのみアップロード可能に (closes #2)
 
 ### Documentation
 
-- `README.md`: マルチサーバー対応に合わせて全面改訂
-  （アーキテクチャ図・設定例・フィールド表・動作説明を v2 に更新）
-- `README.md`: v1 → v2 移行手順を追記
-- `README.md`: `hooks/pre_tool_use.py` の説明を実装に合わせて修正
-  （破壊的操作通知 → AskUserQuestion のボタン変換） (closes #7)
+- `README.md`: マルチサーバー対応に合わせて全面改訂（設定例・フィールド表を v2 に更新）
+- `README.md`: `hooks/pre_tool_use.py` の説明を実装に合わせて修正 (closes #7)
 - `README.md`: config 例から削除済みの `projects[].order` フィールドを除去 (closes #7)
-- `README.md`: `[DISCORD_ATTACH]` の使用方法をセキュリティ制限に合わせて更新
 
-## [1.0.0] - 2026-02-18
+## [1.1.0] - 2026-02-19
+
+### Changed
+
+- `hooks/stop.py`: 応答取得を transcript ファイル解析から hook input の
+  `last_assistant_message` フィールド優先に移行（transcript フォールバック付き）。
+  Bot 再起動直後の race condition を根本解決
+
+## [1.0.0] - 2026-02-19
 
 ### Added
 
@@ -90,5 +179,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 複数プロジェクト対応（チャンネルとプロジェクトディレクトリを 1:1 でマッピング）
 - `DISCORD_BRIDGE_DEBUG=1` によるデバッグログ出力
 
-[Unreleased]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/YOUR_USERNAME/discord-bridge/releases/tag/v1.0.0
+[Unreleased]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.7...HEAD
+[1.7.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.6...v1.7
+[1.6.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.5...v1.6
+[1.5.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.4...v1.5
+[1.4.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.3...v1.4
+[1.3.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.2...v1.3
+[1.2.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.1...v1.2
+[1.1.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.0...v1.1
+[1.0.0]: https://github.com/YOUR_USERNAME/discord-bridge/releases/tag/v1.0
