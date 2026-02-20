@@ -1,3 +1,5 @@
+[日本語](README.md)
+
 # discord-bridge
 
 A CLI tool that bridges Discord channels with Claude Code sessions running in tmux windows.
@@ -5,29 +7,17 @@ A CLI tool that bridges Discord channels with Claude Code sessions running in tm
 Send a message on Discord and it gets forwarded to the corresponding Claude Code session in tmux.
 When Claude finishes responding, the result is automatically sent back to Discord.
 
-## Architecture
+## Key Features
 
-```text
-Discord (Mobile/PC)
-       |  Send message
-       v
-  Discord Bot (discord.js)          <- Spawns a Bot instance per server
-       |  Text / file attachments
-       v
-  TmuxSender
-       |  tmux send-keys
-       v
-  tmux session:window               <- Isolated tmux session per server
-       |  Claude Code processes
-       v
-  Claude Code Hooks (stop.py)       <- Auto-resolves Bot token & channel from cwd
-       |  Discord API POST
-       v
-Discord channel reply
-```
+- **Bidirectional message relay** — Real-time relay between Discord and Claude Code on tmux
+- **Multi-server / multi-project** — Isolate Bot tokens and tmux sessions per server
+- **File attachments** — Pass images/files from Discord to Claude / Upload Claude's output to Discord
+- **Thread support** — Automatically spawn independent Claude Code sessions (tmux panes) per thread
+- **Button interactions** — Auto-detect `AskUserQuestion` tool and convert to Discord buttons (recommend enforcing usage in CLAUDE.md)
+- **Tool permission confirmation** — Approve/deny execution of tools like `Bash` from Discord
+- **Progress notifications** — Forward Claude's in-progress text to Discord in real-time with a `🔄` prefix before each tool call
 
-Supports multiple servers and projects. Each server has its own Bot token and tmux session.
-Channels are mapped 1:1 to project directories and auto-resolved via longest-prefix match on cwd.
+> For detailed architecture and internals, see [docs/ARCHITECTURE_en.md](docs/ARCHITECTURE_en.md).
 
 ## Prerequisites
 
@@ -80,7 +70,11 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
           "name": "my-project",
           "channelId": "CHANNEL_ID_FOR_THIS_PROJECT",
           "projectPath": "/path/to/my-project",
-          "model": "claude-sonnet-4-6"
+          "model": "claude-sonnet-4-6",
+          "thread": {
+            "model": "claude-sonnet-4-6",
+            "permission": "bypassPermissions"
+          }
         }
       ],
       "permissionTools": ["Bash"]
@@ -102,6 +96,8 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
 | `servers[].projects[].channelId` | Discord channel ID mapped to this project |
 | `servers[].projects[].projectPath` | Absolute path to the directory where Claude Code is launched |
 | `servers[].projects[].model` | Claude model to use (e.g., `claude-sonnet-4-6`) |
+| `servers[].projects[].thread.model` | Model to use for thread panes (inherits `model` if omitted) |
+| `servers[].projects[].thread.permission` | Permission mode for thread panes. Set `bypassPermissions` to launch with `--dangerously-skip-permissions` (default permissions if omitted) |
 | `servers[].permissionTools` | List of tool names that require Discord permission confirmation before execution (e.g., `["Bash"]`). Defaults to empty |
 
 > **Important**: `servers` requires at least one entry. Each server's `projects` also requires at least one entry. `servers[0].projects[0]` is used as the fallback channel when cwd doesn't match any project.
@@ -110,19 +106,9 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
 
 > **Finding IDs**: Enable **Developer Mode** in Discord's **Settings > Advanced**, then right-click to copy IDs.
 
-### Migrating from v1
-
-Config files using schemaVersion 1 can be converted to v2 with `migrate_config.py`:
-
-```bash
-python3 migrate_config.py
-```
-
-The original file is backed up to `~/.discord-bridge/config.json.bak`.
-
 ## Claude Code Hooks Setup
 
-Three hooks are required for Discord integration. To configure in `.claude/settings.json`:
+Hooks are required for Discord integration (3 events / 4 commands). To configure in `.claude/settings.json`:
 
 ```json
 {
@@ -156,6 +142,11 @@ Three hooks are required for Discord integration. To configure in `.claude/setti
           {
             "type": "command",
             "command": "python3 /path/to/discord-bridge/hooks/pre_tool_use.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 /path/to/discord-bridge/hooks/pre_tool_progress.py",
+            "async": true
           }
         ]
       }
@@ -172,7 +163,10 @@ Alternatively, add to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md`):
 - Stop: python3 /path/to/discord-bridge/hooks/stop.py
 - Notification: python3 /path/to/discord-bridge/hooks/notify.py
 - PreToolUse: python3 /path/to/discord-bridge/hooks/pre_tool_use.py
+- PreToolUse (async): python3 /path/to/discord-bridge/hooks/pre_tool_progress.py
 ```
+
+> **Note**: The CLAUDE.md format does not support `async: true`. To enable progress notifications, use the `settings.json` configuration instead.
 
 ### Hook Roles
 
@@ -181,6 +175,7 @@ Alternatively, add to your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md`):
 | `hooks/stop.py` | Claude finishes responding | Sends Claude's last response (`last_assistant_message`) to Discord |
 | `hooks/notify.py` | Claude fires a notification | Forwards important notifications to Discord (`idle_prompt` is excluded) |
 | `hooks/pre_tool_use.py` | Before tool execution | Converts AskUserQuestion into a Discord message with buttons. Shows permission confirmation buttons for tools listed in `permissionTools` |
+| `hooks/pre_tool_progress.py` | Before tool execution (async) | Sends Claude's in-progress text to Discord with a `🔄` prefix. Deduplication via MD5 hash of posted content |
 
 ## Usage
 
@@ -199,72 +194,6 @@ Running `start` automatically:
 4. Saves PID to `~/.discord-bridge/discord-bridge.pid` and
    logs to `~/.discord-bridge/discord-bridge.log`
 
-## How It Works
-
-### Message Forwarding (Discord -> Claude Code)
-
-1. The `ownerUserId` user posts a message in a mapped channel
-2. The Bot receives the message and identifies the project by channel ID
-3. Sends the text to the corresponding Claude Code session via `tmux send-keys`
-4. If file attachments are present, they are downloaded to `/tmp/discord-uploads/` and paths are appended
-   (timeout: 30s, max size: 50MB)
-
-### Replies (Claude Code -> Discord)
-
-1. When Claude Code finishes processing, the Stop hook (`stop.py`) is invoked
-2. The last assistant message is extracted from the hook input's `last_assistant_message` field
-3. The destination channel and Bot token are determined by longest-prefix matching cwd against each server's `projectPath`
-4. Posted to Discord API (supports text + file attachments)
-
-### Sending File Attachments (Claude -> Discord)
-
-Include a `[DISCORD_ATTACH: filename]` marker in Claude's response to upload files
-from `/tmp/discord-bridge-outputs/` to Discord.
-
-- Only files under `/tmp/discord-bridge-outputs/` can be uploaded
-- Specify a filename or relative path including subdirectories in the marker
-- Paths pointing outside the allowed directory are ignored
-
-```text
-I've generated the image.
-
-[DISCORD_ATTACH: output.png]
-```
-
-### Button Interactions
-
-Discord button interactions are also supported.
-The `customId` content is sent directly to the Claude Code session
-(useful for Yes/No confirmations, etc.).
-
-#### Tool Permission Confirmation
-
-When a tool listed in `permissionTools` (e.g., `Bash`) is about to execute, Discord displays **Allow / Deny / Other** buttons.
-
-- **Allow** (green): Permits tool execution
-- **Deny** (red): Blocks tool execution
-- **Other**: Displays "📝 理由を入力してください" (Please enter your reason), and the next message can provide a reason
-- If no response within 120 seconds, Claude Code's default behavior applies
-
-#### Thread Support
-
-Messages can be sent and received from threads under monitored channels.
-
-- When you send a message from a thread, it becomes the "active thread" for that channel
-- Claude's responses are sent to the active thread
-- Sending a message in the parent channel clears the active thread, and subsequent responses go to the parent channel
-- If multiple threads are used in the same channel, the most recently messaged thread takes priority
-- If a thread is archived or deleted, responses automatically fall back to the parent channel
-
-#### Automatic Question Detection
-
-When Claude's response ends with a Japanese question pattern (e.g., "〜しますか？", "〜でしょうか？", "〜しましょうか？"),
-the Stop hook automatically converts the message into a **Yes / No / Other** 3-button message.
-
-- **Yes / No**: Clicking sends the selection directly to the Claude Code session
-- **Other**: Clicking displays "📝 回答を入力してください" (Please type your answer), and the next message you send will be forwarded to Claude Code
-- Messages with file attachments are not converted to buttons, even if they contain a question pattern
-
 ## Debugging
 
 Set `DISCORD_BRIDGE_DEBUG=1` to enable debug log output to the following files.
@@ -279,7 +208,7 @@ export DISCORD_BRIDGE_DEBUG=1
 
 | File | Source |
 | --- | --- |
-| `/tmp/discord-bridge-debug.txt` | `hooks/stop.py` |
+| `/tmp/discord-bridge-debug.txt` | `hooks/stop.py` / `hooks/pre_tool_progress.py` (`[progress]` prefix) |
 | `/tmp/discord-bridge-notify-debug.txt` | `hooks/notify.py` |
 
 ## License

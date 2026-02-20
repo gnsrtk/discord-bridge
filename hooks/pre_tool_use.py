@@ -35,13 +35,13 @@ def format_tool_info(tool_name: str, tool_input: dict) -> str:
 
 
 def post_permission_buttons(bot_token: str, channel_id: str, content: str) -> None:
-    """許可/拒否/それ以外の3ボタンメッセージを送信する。"""
+    """Allow/Deny/Other の3ボタンメッセージを送信する。"""
     components = [{
         "type": 1,  # ActionRow
         "components": [
-            {"type": 2, "style": 3, "label": "許可", "custom_id": "perm:allow"},
-            {"type": 2, "style": 4, "label": "拒否", "custom_id": "perm:deny"},
-            {"type": 2, "style": 2, "label": "それ以外", "custom_id": "perm:other"},
+            {"type": 2, "style": 3, "label": "Allow", "custom_id": "perm:allow"},
+            {"type": 2, "style": 4, "label": "Deny", "custom_id": "perm:deny"},
+            {"type": 2, "style": 2, "label": "Other", "custom_id": "perm:other"},
         ],
     }]
     payload = json.dumps({"content": content, "components": components}).encode()
@@ -176,7 +176,7 @@ def main() -> None:
             if messages:
                 preceding_text = "\n\n".join(messages)
 
-        question_text = questions[0].get("question", "(質問なし)")
+        question_text = questions[0].get("question", "(no question)")
         content = build_content(preceding_text, question_text)
         components = build_components(questions)
 
@@ -209,7 +209,7 @@ def main() -> None:
     # permissionTools 処理
     elif tool_name in permission_tools:
         info = format_tool_info(tool_name, tool_input)
-        content = f"\U0001f510 ツール許可確認\n{info}"
+        content = f"\U0001f510 Tool permission\n{info}"
 
         try:
             post_permission_buttons(bot_token, target_channel, content)

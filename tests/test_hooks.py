@@ -408,111 +408,6 @@ class TestResolveChannel:
         assert permission_tools == []
 
 
-# ---------------------------------------------------------------------------
-# is_question
-# ---------------------------------------------------------------------------
-
-class TestIsQuestion:
-    def test_shimasu_ka(self):
-        """「しますか？」パターンを検出する。"""
-        assert stop.is_question("実行しますか？") is True
-
-    def test_deshou_ka(self):
-        """「でしょうか？」パターンを検出する。"""
-        assert stop.is_question("よろしいでしょうか？") is True
-
-    def test_shou_ka(self):
-        """「しょうか？」パターンを検出する。"""
-        assert stop.is_question("確認しましょうか？") is True
-
-    def test_desu_ka(self):
-        """「ですか？」パターンを検出する。"""
-        assert stop.is_question("よろしいですか？") is True
-
-    def test_fullwidth_question_mark(self):
-        """全角疑問符を検出する。"""
-        assert stop.is_question("実行しますか？") is True
-
-    def test_halfwidth_question_mark(self):
-        """半角疑問符を検出する。"""
-        assert stop.is_question("実行しますか?") is True
-
-    def test_trailing_whitespace(self):
-        """末尾空白があっても検出する。"""
-        assert stop.is_question("実行しますか？  ") is True
-
-    def test_period_ending_not_question(self):
-        """句点終わりは質問ではない。"""
-        assert stop.is_question("実行しました。") is False
-
-    def test_no_question_mark(self):
-        """疑問符なしは質問ではない。"""
-        assert stop.is_question("実行します") is False
-
-    def test_empty_string(self):
-        """空文字列は質問ではない。"""
-        assert stop.is_question("") is False
-
-    def test_question_in_middle(self):
-        """文中に質問パターンがあっても末尾でなければ False。"""
-        assert stop.is_question("しますか？という話ですが、完了しました。") is False
-
-
-# ---------------------------------------------------------------------------
-# stop.main with buttons (質問パターン検出)
-# ---------------------------------------------------------------------------
-
-class TestStopMainWithButtons:
-    def _make_hook_input(self, message: str) -> dict:
-        return {
-            "session_id": str(uuid.uuid4()),
-            "transcript_path": "",
-            "cwd": "/tmp/test-project",
-            "last_assistant_message": message,
-        }
-
-    def _mock_config(self):
-        return {"schemaVersion": 2, "servers": []}
-
-    def test_question_uses_buttons(self):
-        """質問パターンの場合、post_message_with_buttons が呼ばれる。"""
-        hook_input = self._make_hook_input("この変更を適用しますか？")
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
-             mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
-             mock.patch("stop.post_message_with_buttons") as mock_buttons, \
-             mock.patch("stop.post_message") as mock_plain:
-            stop.main()
-        mock_buttons.assert_called_once()
-        mock_plain.assert_not_called()
-
-    def test_non_question_uses_plain(self):
-        """非質問パターンの場合、post_message が呼ばれる。"""
-        hook_input = self._make_hook_input("実装完了しました。")
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
-             mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
-             mock.patch("stop.post_message_with_buttons") as mock_buttons, \
-             mock.patch("stop.post_message") as mock_plain:
-            stop.main()
-        mock_plain.assert_called_once()
-        mock_buttons.assert_not_called()
-
-    def test_attachment_with_question_uses_files(self):
-        """添付 + 質問パターンの場合、post_message_with_files が呼ばれボタン化しない。"""
-        hook_input = self._make_hook_input(
-            "確認しますか？ [DISCORD_ATTACH: /tmp/discord-bridge-outputs/out.png]"
-        )
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
-             mock.patch("stop.load_config", return_value=self._mock_config()), \
-             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test-project", [])), \
-             mock.patch("stop.post_message_with_files") as mock_files, \
-             mock.patch("stop.post_message_with_buttons") as mock_buttons, \
-             mock.patch("stop.post_message") as mock_plain:
-            stop.main()
-        mock_files.assert_called_once()
-        mock_buttons.assert_not_called()
-        mock_plain.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -763,6 +658,37 @@ class TestThreadTracking:
         """スレッドトラッキングなし → channel_id をそのまま返す。"""
         result = resolve_target_channel("no-thread-channel-xyz")
         assert result == "no-thread-channel-xyz"
+
+    def test_env_var_takes_priority(self):
+        """DISCORD_BRIDGE_THREAD_ID 環境変数がファイルより優先される。"""
+        channel_id = "test-env-priority"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": "file-thread-id"}))
+        try:
+            with mock.patch.dict(os.environ, {"DISCORD_BRIDGE_THREAD_ID": "env-thread-id"}):
+                result = resolve_target_channel(channel_id)
+            assert result == "env-thread-id"
+        finally:
+            tracking_file.unlink(missing_ok=True)
+
+    def test_env_var_without_file(self):
+        """DISCORD_BRIDGE_THREAD_ID 設定時、ファイルなしでもその値を返す。"""
+        with mock.patch.dict(os.environ, {"DISCORD_BRIDGE_THREAD_ID": "env-only-thread"}):
+            result = resolve_target_channel("no-file-channel-xyz")
+        assert result == "env-only-thread"
+
+    def test_no_env_var_falls_back_to_file(self):
+        """DISCORD_BRIDGE_THREAD_ID 未設定 → ファイルベース IPC に従う。"""
+        channel_id = "test-no-env-fallback"
+        tracking_file = Path(f"/tmp/discord-bridge-thread-{channel_id}.json")
+        tracking_file.write_text(json.dumps({"threadId": "file-thread-only"}))
+        try:
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("DISCORD_BRIDGE_THREAD_ID", None)
+                result = resolve_target_channel(channel_id)
+            assert result == "file-thread-only"
+        finally:
+            tracking_file.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

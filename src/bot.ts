@@ -5,11 +5,12 @@ import {
   type Message,
   type ButtonInteraction,
 } from 'discord.js';
+import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile, readdir, stat, unlink } from 'node:fs/promises';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { type Config, type Server } from './config.js';
-import { TmuxSender } from './tmux-sender.js';
+import { TmuxSender, escapeTmuxShellArg } from './tmux-sender.js';
 
 const UPLOAD_DIR = '/tmp/discord-uploads';
 const DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -27,9 +28,40 @@ export function writeThreadTracking(parentChannelId: string, threadId: string | 
   }
 }
 
+export function buildPermissionFlag(permission?: string): string {
+  if (permission === 'bypassPermissions') return ' --dangerously-skip-permissions';
+  return '';
+}
+
+export function createThreadPane(
+  session: string,
+  windowName: string,
+  projectPath: string,
+  model: string,
+  threadId: string,
+  permission?: string,
+): string {
+  const paneId = execFileSync('tmux', [
+    'split-window', '-t', `${session}:${windowName}`,
+    '-d', '-P', '-F', '#{pane_id}',
+  ], { encoding: 'utf8' }).trim();
+
+  const permFlag = buildPermissionFlag(permission);
+  const cmd = `export DISCORD_BRIDGE_THREAD_ID=${threadId} && cd "${escapeTmuxShellArg(projectPath)}" && claude --model "${escapeTmuxShellArg(model)}"${permFlag}`;
+  execFileSync('tmux', ['send-keys', '-t', paneId, cmd, 'Enter']);
+
+  return paneId;
+}
+
+export function killThreadPane(paneId: string): void {
+  try {
+    execFileSync('tmux', ['kill-pane', '-t', paneId]);
+  } catch { /* pane already gone */ }
+}
+
 export function buildMessageWithAttachments(content: string, paths: string[]): string {
   if (paths.length === 0) return content;
-  const pathLines = paths.map((p) => `[添付: ${p}]`).join('\n');
+  const pathLines = paths.map((p) => `[attachment: ${p}]`).join('\n');
   return content ? `${content}\n${pathLines}` : pathLines;
 }
 
@@ -100,6 +132,7 @@ export async function handleInteractionCreate(
   channelSenderMap: Map<string, TmuxSender>,
   defaultSender: TmuxSender,
   threadParentMap?: Map<string, string>,
+  threadPaneMap?: Map<string, string>,
 ): Promise<void> {
   if (!interaction.isButton()) return;
   const btn = interaction as ButtonInteraction;
@@ -109,7 +142,7 @@ export async function handleInteractionCreate(
   }
   if (btn.customId === '__other__') {
     try {
-      await btn.reply({ content: '📝 回答を入力してください', ephemeral: false });
+      await btn.reply({ content: '📝 Please enter your answer', ephemeral: false });
     } catch { /* ignore */ }
     return;
   }
@@ -132,7 +165,7 @@ export async function handleInteractionCreate(
         console.error('[discord-bridge] Failed to write permission response:', err);
       }
       try {
-        await btn.reply({ content: '📝 理由を入力してください', ephemeral: false });
+        await btn.reply({ content: '📝 Please enter your reason', ephemeral: false });
       } catch { /* ignore */ }
       return;
     }
@@ -146,7 +179,7 @@ export async function handleInteractionCreate(
 
     try {
       await btn.reply({
-        content: decision === 'allow' ? '✅ 許可しました' : '❌ 拒否しました',
+        content: decision === 'allow' ? '✅ Allowed' : '❌ Denied',
         ephemeral: false,
       });
     } catch { /* ignore */ }
@@ -155,14 +188,14 @@ export async function handleInteractionCreate(
   const resolvedBtnChannelId = resolveParentChannel(btn.channelId, channelSenderMap, threadParentMap, btn.channel);
   let sent = false;
   try {
-    handleButtonInteraction(resolvedBtnChannelId, btn.customId, channelSenderMap, defaultSender);
+    handleButtonInteraction(resolvedBtnChannelId, btn.customId, channelSenderMap, defaultSender, btn.channelId, threadPaneMap);
     sent = true;
   } catch (err) {
     console.error('[discord-bridge] Failed to handle button interaction:', err);
   }
   try {
     const label = btn.customId.includes(':') ? btn.customId.split(':').slice(1).join(':') : btn.customId;
-    const replyContent = sent ? `✅ 選択: ${label}` : '❌ 送信に失敗しました';
+    const replyContent = sent ? `✅ Selected: ${label}` : '❌ Failed to send';
     await btn.reply({ content: replyContent, ephemeral: true });
   } catch { /* ignore reply failure */ }
 }
@@ -172,8 +205,11 @@ export function handleButtonInteraction(
   customId: string,
   channelSenderMap: Map<string, TmuxSender>,
   defaultSender: TmuxSender,
+  originalChannelId?: string,
+  threadPaneMap?: Map<string, string>,
 ): void {
-  const sender = channelSenderMap.get(channelId) ?? defaultSender;
+  const paneTarget = originalChannelId ? threadPaneMap?.get(originalChannelId) : undefined;
+  const sender = paneTarget ? new TmuxSender(paneTarget) : (channelSenderMap.get(channelId) ?? defaultSender);
   sender.send(customId.includes(':') ? customId.split(':').slice(1).join(':') : customId);
 }
 
@@ -216,6 +252,8 @@ export function createServerBot(server: Server): Client {
 
   const listenChannelIds = new Set(server.projects.map((p) => p.channelId));
   const threadParentMap = new Map<string, string>(); // threadId → parentChannelId
+  const threadPaneMap = new Map<string, string>(); // threadId → tmux pane target (e.g., "%42")
+  const threadPaneCreating = new Set<string>(); // race condition 防止
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`[discord-bridge] Bot ready: ${c.user.tag}`);
@@ -226,7 +264,7 @@ export function createServerBot(server: Server): Client {
       try {
         const channel = await c.channels.fetch(project.channelId);
         if (channel?.isSendable()) {
-          await channel.send('🟢 Bot 起動');
+          await channel.send('🟢 discord-bridge started');
         }
       } catch (err) {
         console.error(`[discord-bridge] Failed to send ready message to ${project.channelId}:`, err);
@@ -239,25 +277,93 @@ export function createServerBot(server: Server): Client {
     if (msg.author.id !== server.discord.ownerUserId) return;
 
     let parentChannelId: string;
+    let trySend: (text: string) => void;
+
     if (listenChannelIds.has(msg.channelId)) {
       parentChannelId = msg.channelId;
       writeThreadTracking(parentChannelId, null); // 親チャンネルに戻った
+      const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+      trySend = (text: string): void => {
+        try { sender.send(text); } catch (err) {
+          console.error(`[discord-bridge] Failed to send to tmux in channel ${msg.channelId}:`, err);
+        }
+      };
     } else if (msg.channel.isThread() && msg.channel.parentId && listenChannelIds.has(msg.channel.parentId)) {
       parentChannelId = msg.channel.parentId;
-      writeThreadTracking(parentChannelId, msg.channelId); // スレッドを追跡
       threadParentMap.set(msg.channelId, parentChannelId);
+
+      if (threadPaneMap.has(msg.channelId)) {
+        // 既存 pane にルーティング
+        const paneTarget = threadPaneMap.get(msg.channelId)!;
+        const paneSender = new TmuxSender(paneTarget);
+        trySend = (text: string): void => {
+          try { paneSender.send(text); } catch (err) {
+            console.error(`[discord-bridge] Pane send failed, removing stale entry:`, err);
+            threadPaneMap.delete(msg.channelId);
+            writeThreadTracking(parentChannelId, msg.channelId);
+            const fallbackSender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+            try { fallbackSender.send(text); } catch { /* ignore */ }
+          }
+        };
+      } else if (threadPaneCreating.has(msg.channelId)) {
+        // 作成中 → 親 pane にフォールバック
+        writeThreadTracking(parentChannelId, msg.channelId);
+        const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+        trySend = (text: string): void => {
+          try { sender.send(text); } catch (err) {
+            console.error(`[discord-bridge] Failed to send to tmux in channel ${msg.channelId}:`, err);
+          }
+        };
+      } else {
+        // 新規 pane 作成
+        const project = server.projects.find((p) => p.channelId === parentChannelId);
+        if (project) {
+          threadPaneCreating.add(msg.channelId);
+          try {
+            const paneId = createThreadPane(
+              session, project.name, project.projectPath,
+              project.thread?.model ?? project.model,
+              msg.channelId,
+              project.thread?.permission,
+            );
+            threadPaneMap.set(msg.channelId, paneId);
+            const paneSender = new TmuxSender(paneId);
+            trySend = (text: string): void => {
+              try { paneSender.send(text); } catch (err) {
+                console.error(`[discord-bridge] Pane send failed, removing stale entry:`, err);
+                threadPaneMap.delete(msg.channelId);
+                writeThreadTracking(parentChannelId, msg.channelId);
+                const fallbackSender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+                try { fallbackSender.send(text); } catch { /* ignore */ }
+              }
+            };
+          } catch (err) {
+            console.error(`[discord-bridge] Failed to create thread pane:`, err);
+            // pane 作成失敗 → 親 pane にフォールバック（v1.6 動作）
+            writeThreadTracking(parentChannelId, msg.channelId);
+            const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+            trySend = (text: string): void => {
+              try { sender.send(text); } catch (e) {
+                console.error(`[discord-bridge] Failed to send to tmux in channel ${msg.channelId}:`, e);
+              }
+            };
+          } finally {
+            threadPaneCreating.delete(msg.channelId);
+          }
+        } else {
+          // project が見つからない → 親 pane にフォールバック
+          writeThreadTracking(parentChannelId, msg.channelId);
+          const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
+          trySend = (text: string): void => {
+            try { sender.send(text); } catch (err) {
+              console.error(`[discord-bridge] Failed to send to tmux in channel ${msg.channelId}:`, err);
+            }
+          };
+        }
+      }
     } else {
       return;
     }
-    const sender = channelSenderMap.get(parentChannelId) ?? defaultSender;
-
-    const trySend = (text: string): void => {
-      try {
-        sender.send(text);
-      } catch (err) {
-        console.error(`[discord-bridge] Failed to send to tmux in channel ${msg.channelId}:`, err);
-      }
-    };
 
     if (msg.attachments.size > 0) {
       try {
@@ -268,7 +374,7 @@ export function createServerBot(server: Server): Client {
       } catch (err) {
         console.error(`[discord-bridge] Failed to download attachment in channel ${msg.channelId}:`, err);
         try {
-          await msg.reply('添付ファイルのダウンロードに失敗しました。メッセージ本文のみ送信しました。');
+          await msg.reply('Failed to download attachment. Sending message text only.');
         } catch { /* ignore reply failure */ }
         trySend(msg.content);
       }
@@ -278,8 +384,16 @@ export function createServerBot(server: Server): Client {
   });
 
   client.on(Events.InteractionCreate, (interaction) =>
-    handleInteractionCreate(interaction, server.discord.ownerUserId, channelSenderMap, defaultSender, threadParentMap),
+    handleInteractionCreate(interaction, server.discord.ownerUserId, channelSenderMap, defaultSender, threadParentMap, threadPaneMap),
   );
+
+  client.on(Events.ThreadUpdate, (_oldThread, newThread) => {
+    if (newThread.archived && threadPaneMap.has(newThread.id)) {
+      const paneId = threadPaneMap.get(newThread.id)!;
+      killThreadPane(paneId);
+      threadPaneMap.delete(newThread.id);
+    }
+  });
 
   return client;
 }

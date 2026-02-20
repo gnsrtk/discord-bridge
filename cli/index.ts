@@ -6,15 +6,14 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, type Config, type Server } from '../src/config.js';
 import { startServerBot, warnDuplicateChannels } from '../src/bot.js';
+import { escapeTmuxShellArg } from '../src/tmux-sender.js';
 import { type Client } from 'discord.js';
+
+export { escapeTmuxShellArg };
 
 const CONFIG_DIR = join(homedir(), '.discord-bridge');
 const PID_FILE = join(CONFIG_DIR, 'discord-bridge.pid');
 const LOG_FILE = join(CONFIG_DIR, 'discord-bridge.log');
-
-export function escapeTmuxShellArg(value: string): string {
-  return value.replace(/["$`\\]/g, '\\$&');
-}
 
 export function tmuxSessionExists(session: string): boolean {
   try {

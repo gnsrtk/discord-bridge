@@ -31,27 +31,28 @@ describe('TmuxSender', () => {
     expect(calls[1]).toEqual(['tmux', ['send-keys', '-t', 'session:1', 'Enter'], { stdio: 'inherit' }]);
   });
 
-  test('複数行: load-buffer + paste-buffer でブラケットペースト送信', () => {
+  test('複数行: send-keys -l でブラケットペーストシーケンスを送り、Enter を別コールで送る', () => {
     const sender = new TmuxSender('main:0');
     sender.send('line1\nline2\nline3');
 
     const calls = vi.mocked(execFileSync).mock.calls;
-    expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual(['tmux', ['load-buffer', '-'], {
-      input: 'line1\nline2\nline3',
-      stdio: ['pipe', 'inherit', 'inherit'],
-    }]);
-    expect(calls[1]).toEqual(['tmux', ['paste-buffer', '-d', '-p', '-t', 'main:0'], { stdio: 'inherit' }]);
-    expect(calls[2]).toEqual(['tmux', ['send-keys', '-t', 'main:0', 'Enter'], { stdio: 'inherit' }]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual([
+      'tmux',
+      ['send-keys', '-t', 'main:0', '-l', '\x1b[200~line1\nline2\nline3\x1b[201~'],
+      { stdio: 'inherit' },
+    ]);
+    expect(calls[1]).toEqual(['tmux', ['send-keys', '-t', 'main:0', 'Enter'], { stdio: 'inherit' }]);
   });
 
-  test('改行1つだけでも load-buffer 経由になる', () => {
+  test('改行1つだけでも send-keys -l + Enter 経由になる', () => {
     const sender = new TmuxSender('sess:2');
     sender.send('first\nsecond');
 
     const calls = vi.mocked(execFileSync).mock.calls;
+    expect(calls).toHaveLength(2);
     expect(calls[0][0]).toBe('tmux');
-    expect(calls[0][1]).toEqual(['load-buffer', '-']);
-    expect(calls[1][1]).toEqual(['paste-buffer', '-d', '-p', '-t', 'sess:2']);
+    expect(calls[0][1]).toEqual(['send-keys', '-t', 'sess:2', '-l', '\x1b[200~first\nsecond\x1b[201~']);
+    expect(calls[1]).toEqual(['tmux', ['send-keys', '-t', 'sess:2', 'Enter'], { stdio: 'inherit' }]);
   });
 });

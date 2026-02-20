@@ -9,17 +9,17 @@ vi.mock('node:fs/promises', () => ({
 describe('buildMessageWithAttachments', () => {
   test('テキストと添付パスを結合する', () => {
     const result = buildMessageWithAttachments('確認して', ['/tmp/discord-uploads/123_photo.png']);
-    expect(result).toBe('確認して\n[添付: /tmp/discord-uploads/123_photo.png]');
+    expect(result).toBe('確認して\n[attachment: /tmp/discord-uploads/123_photo.png]');
   });
 
   test('添付が複数ある場合', () => {
     const result = buildMessageWithAttachments('2ファイル', ['/tmp/a.txt', '/tmp/b.py']);
-    expect(result).toBe('2ファイル\n[添付: /tmp/a.txt]\n[添付: /tmp/b.py]');
+    expect(result).toBe('2ファイル\n[attachment: /tmp/a.txt]\n[attachment: /tmp/b.py]');
   });
 
   test('テキストなし・添付のみの場合', () => {
     const result = buildMessageWithAttachments('', ['/tmp/file.pdf']);
-    expect(result).toBe('[添付: /tmp/file.pdf]');
+    expect(result).toBe('[attachment: /tmp/file.pdf]');
   });
 
   test('添付なしの場合はテキストのみ返す', () => {

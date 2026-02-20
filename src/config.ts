@@ -3,11 +3,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
+const ThreadConfigSchema = z.object({
+  model: z.string().min(1).optional(),
+  permission: z.string().optional(),
+});
+
 const ProjectSchema = z.object({
   name: z.string().min(1),
   channelId: z.string().min(1),
   projectPath: z.string().min(1),
   model: z.string().min(1),
+  thread: ThreadConfigSchema.optional(),
 });
 
 const ServerSchema = z.object({
@@ -32,6 +38,7 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type Server = z.infer<typeof ServerSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
+export type ThreadConfig = z.infer<typeof ThreadConfigSchema>;
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.discord-bridge', 'config.json');
 

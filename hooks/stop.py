@@ -30,14 +30,9 @@ def _dbg(msg: str) -> None:
             f.write(msg + "\n")
 
 ATTACH_PATTERN = re.compile(r'\[DISCORD_ATTACH:\s*([^\]]+)\]')
-QUESTION_PATTERN = re.compile(r'(ます|でしょう|しょう|です)か[？?]\s*$')
 ATTACH_ALLOWED_DIR = "/tmp/discord-bridge-outputs"
 DISCORD_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB
 
-
-def is_question(text: str) -> bool:
-    """テキスト末尾が日本語の質問パターンかどうかを判定する。"""
-    return bool(QUESTION_PATTERN.search(text))
 
 
 def extract_attachments(message: str) -> tuple[str, list[str]]:
@@ -175,31 +170,6 @@ def post_message(bot_token: str, channel_id: str, content: str) -> None:
     _send_request(req, timeout=10)
 
 
-def post_message_with_buttons(bot_token: str, channel_id: str, content: str) -> None:
-    """テキスト + はい/いいえ/それ以外の3ボタン付きメッセージを送信する。"""
-    components = [{
-        "type": 1,  # ActionRow
-        "components": [
-            {"type": 2, "style": 1, "label": "はい", "custom_id": "0:はい"},
-            {"type": 2, "style": 1, "label": "いいえ", "custom_id": "1:いいえ"},
-            {"type": 2, "style": 2, "label": "それ以外", "custom_id": "__other__"},
-        ],
-    }]
-    payload = json.dumps({"content": content, "components": components}).encode()
-    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bot {bot_token}",
-            "User-Agent": "DiscordBot (discord-bridge, 1.0.0)",
-        },
-        method="POST",
-    )
-    _send_request(req, timeout=10)
-
-
 def main() -> None:
     try:
         hook_input = json.load(sys.stdin)
@@ -262,21 +232,12 @@ def main() -> None:
     target_channel = resolve_target_channel(channel_id)
     _dbg(f"cwd: {cwd!r} -> channel_id: {channel_id} target: {target_channel} project: {project_name!r}")
 
-    # タイトル: プロジェクト一致なら "✅ Claude 完了"、general フォールバックなら cwd を付記
-    if project_name:
-        title = "✅ Claude 完了"
-    else:
-        cwd_label = Path(cwd).name if cwd else "unknown"
-        title = f"✅ Claude 完了 [{cwd_label}]"
-
     clean_message, attach_paths = extract_attachments(message)
-    display_text = f"{title}\n{clean_message}" if clean_message else title
+    display_text = clean_message
     _dbg(f"sending: text={display_text[:40]!r} attach={len(attach_paths)}")
     try:
         if attach_paths:
             post_message_with_files(bot_token, target_channel, display_text, attach_paths)
-        elif is_question(clean_message):
-            post_message_with_buttons(bot_token, target_channel, display_text)
         else:
             post_message(bot_token, target_channel, display_text)
         _dbg("sent OK")
@@ -287,8 +248,6 @@ def main() -> None:
             try:
                 if attach_paths:
                     post_message_with_files(bot_token, channel_id, display_text, attach_paths)
-                elif is_question(clean_message):
-                    post_message_with_buttons(bot_token, channel_id, display_text)
                 else:
                     post_message(bot_token, channel_id, display_text)
                 _dbg("fallback sent OK")
