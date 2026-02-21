@@ -16,16 +16,24 @@
           "name": "global",
           "channelId": "YOUR_CHANNEL_ID_FOR_GLOBAL",
           "projectPath": "/path/to/home",
-          "model": "claude-sonnet-4-6"
+          "model": "claude-sonnet-4-6",
+          "startup": true
         },
         {
           "name": "my-project",
           "channelId": "YOUR_CHANNEL_ID_FOR_MY_PROJECT",
           "projectPath": "/path/to/my-project",
-          "model": "claude-sonnet-4-6"
+          "model": "claude-sonnet-4-6",
+          "startup": true,
+          "thread": {
+            "model": "claude-sonnet-4-6",
+            "isolation": "worktree"
+          },
+          "threads": []
         }
       ],
-      "permissionTools": ["Bash"]
+      "permissionTools": ["Bash"],
+      "generalChannelId": "YOUR_CHANNEL_ID_FOR_GENERAL"
     }
   ]
 }

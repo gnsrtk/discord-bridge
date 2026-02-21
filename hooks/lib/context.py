@@ -1,4 +1,5 @@
 """Context window progress bar and rate limit utilities."""
+from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -6,25 +7,6 @@ from datetime import datetime, timezone
 
 CACHE_PATH_TEMPLATE = "/tmp/discord-bridge-context-{session_id}.json"
 
-
-def format_progress_bar(used_percentage: int) -> str:
-    """Format context usage as a visual progress bar.
-
-    Returns: e.g. "📊 █████░░░░░ 50%"
-    """
-    clamped = max(0, min(100, used_percentage))
-    filled = round(clamped / 10)
-    empty = 10 - filled
-
-    if clamped >= 90:
-        emoji = "🚨"
-    elif clamped >= 70:
-        emoji = "⚠️"
-    else:
-        emoji = "📊"
-
-    bar = "█" * filled + "░" * empty
-    return f"{emoji} {bar} {clamped}%"
 
 
 def format_reset_time(resets_at: str) -> str:
@@ -52,12 +34,26 @@ def format_rate_limit_entry(label: str, utilization: int, resets_at: str) -> str
     return f"{label}:{utilization}%({reset})"
 
 
-def format_footer(used_percentage: int, rate_limits: dict | None = None) -> str:
-    """Format the full Discord footer with context bar and rate limits.
+def format_context_status(used_percentage: int, model: str | None = None) -> str:
+    """Format context usage with model name.
 
-    Returns: e.g. "📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)"
+    Returns: e.g. "📊 Opus 4.6 50%" or "📊 ctx 50%" if no model name
     """
-    parts = [format_progress_bar(used_percentage)]
+    clamped = max(0, min(100, used_percentage))
+    label = model if model else "ctx"
+    return f"📊 {label} {clamped}%"
+
+
+def format_footer(
+    used_percentage: int,
+    rate_limits: dict | None = None,
+    model: str | None = None,
+) -> str:
+    """Format the full Discord footer with model, context %, and rate limits.
+
+    Returns: e.g. "Opus 4.6 50% │ session:45%(2h30m) │ weekly:12%(5d03h)"
+    """
+    parts = [format_context_status(used_percentage, model)]
 
     if rate_limits and isinstance(rate_limits, dict):
         fh = rate_limits.get("five_hour")

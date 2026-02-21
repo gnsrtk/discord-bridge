@@ -43,8 +43,8 @@ if ! command -v python3 &>/dev/null; then
 fi
 PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
 PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
-  fail "Python 3.10 以上が必要です（現在: $(python3 --version)）"
+if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 9 ]; }; then
+  fail "Python 3.9 以上が必要です（現在: $(python3 --version)）"
 fi
 ok "$(python3 --version)"
 

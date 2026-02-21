@@ -178,6 +178,17 @@ class TestGetAssistantMessages:
         # 説明1 は前回の AQ より前なので除外され、説明2 のみ返る
         assert result == ["説明2"]
 
+    def test_summary_entry_acts_as_boundary(self, tmp_path):
+        """compact 後の summary エントリは境界として扱い、古いメッセージを除外する。"""
+        entries = [
+            {"type": "assistant", "message": {"content": "古い回答"}},
+            {"type": "summary", "summary": "会話の要約..."},
+            {"type": "assistant", "message": {"content": "新しい回答"}},
+        ]
+        path = self._write_jsonl(tmp_path, entries)
+        result = get_assistant_messages(path)
+        assert result == ["新しい回答"]
+
 
 # ---------------------------------------------------------------------------
 # _dbg
@@ -536,7 +547,7 @@ class TestPreToolUsePermission:
 
         mock_perm_buttons.assert_called_once()
         output = json.loads(mock_stdout.getvalue())
-        assert output["decision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
     def test_permission_tool_deny(self):
         """permissionTools で拒否が返された場合、deny を出力する。"""
@@ -555,7 +566,7 @@ class TestPreToolUsePermission:
             pre_tool_use.main()
 
         output = json.loads(mock_stdout.getvalue())
-        assert output["decision"] == "deny"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_non_permission_tool_exits(self):
         """permissionTools に含まれないツールは exit(0) する。"""
@@ -589,8 +600,9 @@ class TestPreToolUsePermission:
             pre_tool_use.main()
 
         output = json.loads(mock_stdout.getvalue())
-        assert output["decision"] == "block"
-        assert "Other" in output.get("reason", "")
+        hook_out = output["hookSpecificOutput"]
+        assert hook_out["permissionDecision"] == "deny"
+        assert "Other" in hook_out.get("permissionDecisionReason", "")
 
     def test_permission_timeout_exits(self):
         """タイムアウト時は exit(0) する。"""
@@ -791,8 +803,7 @@ class TestStopContextProgressBar:
                  mock.patch("stop.post_message") as mock_post:
                 stop.main()
             content = mock_post.call_args[0][2]
-            assert "████░░░░░░" in content
-            assert "42%" in content
+            assert "📊 ctx 42%" in content
         finally:
             Path(cache_path).unlink(missing_ok=True)
 

@@ -1,4 +1,5 @@
 """Transcript reading utilities shared across hooks."""
+from __future__ import annotations
 
 import json
 import time
@@ -60,7 +61,12 @@ def _read_messages(
 
     last_user_pos = -1
     for i, entry in enumerate(entries):
-        if entry.get("type") != "user":
+        entry_type = entry.get("type")
+        # compact 後の summary エントリは境界として扱い、古いメッセージを除外する
+        if entry_type == "summary":
+            last_user_pos = i
+            continue
+        if entry_type != "user":
             continue
         content = entry.get("message", {}).get("content", "")
         is_tool_result = _is_tool_result_only(content)

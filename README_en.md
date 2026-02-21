@@ -24,7 +24,7 @@ When Claude finishes responding, the result is automatically sent back to Discor
 - **Node.js** 18+
 - **tmux** 3.0+
 - **Claude Code** 2.1.47+ (requires `last_assistant_message` field support)
-- **Python** 3.10+ (for hooks)
+- **Python** 3.9+ (for hooks)
 - **Discord Bot token** (see below)
 
 ## Installation
@@ -77,7 +77,8 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
           }
         }
       ],
-      "permissionTools": ["Bash"]
+      "permissionTools": ["Bash"],
+      "generalChannelId": "CHANNEL_ID_FOR_CONTROL_PANEL (optional)"
     }
   ]
 }
@@ -98,7 +99,11 @@ Create `~/.discord-bridge/config.json` (schemaVersion 2):
 | `servers[].projects[].model` | Claude model to use (e.g., `claude-sonnet-4-6`) |
 | `servers[].projects[].thread.model` | Model to use for thread panes (inherits `model` if omitted) |
 | `servers[].projects[].thread.permission` | Permission mode for thread panes. Set `bypassPermissions` to launch with `--dangerously-skip-permissions` (default permissions if omitted) |
+| `servers[].projects[].thread.isolation` | Isolation mode for thread panes. Set `worktree` to create an independent working environment via git worktree (no isolation if omitted) |
+| `servers[].projects[].startup` | Set to `true` to automatically create this project's tmux window on Bot startup (default: `false`) |
+| `servers[].projects[].threads[]` | Per-thread config entries (auto-saved by the Bot). Each entry supports `name`, `channelId`, `model`, `projectPath`, `permission`, `isolation`, and `startup` |
 | `servers[].permissionTools` | List of tool names that require Discord permission confirmation before execution (e.g., `["Bash"]`). Defaults to empty |
+| `servers[].generalChannelId` | Channel ID for the control panel (optional). When set, the bot sends a project list with Start/Stop/Refresh buttons on startup, and refreshes status on any text message (without forwarding to tmux) |
 
 > **Important**: `servers` requires at least one entry. Each server's `projects` also requires at least one entry. `servers[0].projects[0]` is used as the fallback channel when cwd doesn't match any project.
 
@@ -188,9 +193,9 @@ discord-bridge stop    # Stop
 Running `start` automatically:
 
 1. Creates a tmux session for each server (if not already existing)
-2. Creates a tmux window for each project and runs
+2. Creates a tmux window for each project with `startup: true` and runs
    `cd <projectPath> && claude --model <model>` (skips if window already exists)
-3. Starts a Discord Bot for each server and sends a startup notification to each project's channel
+3. Starts a Discord Bot for each server; if `generalChannelId` is configured, sends a control panel to that channel
 4. Saves PID to `~/.discord-bridge/discord-bridge.pid` and
    logs to `~/.discord-bridge/discord-bridge.log`
 

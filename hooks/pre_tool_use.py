@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse hook: AskUserQuestion を Discord ボタンに変換する / permissionTools の許可確認"""
+from __future__ import annotations
 
 import json
 import sys
@@ -134,6 +135,25 @@ def build_content(preceding_text: str, question_text: str) -> str:
     return f"{preceding_text}\n\n{question_part}"
 
 
+def build_hook_output(
+    decision: str,
+    reason: str = "",
+    additional_context: str = "",
+) -> str:
+    """hookSpecificOutput.permissionDecision 形式の JSON 文字列を構築する。"""
+    output: dict = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+        }
+    }
+    if reason:
+        output["hookSpecificOutput"]["permissionDecisionReason"] = reason
+    if additional_context:
+        output["hookSpecificOutput"]["additionalContext"] = additional_context
+    return json.dumps(output)
+
+
 def main() -> None:
     try:
         hook_input = json.load(sys.stdin)
@@ -201,10 +221,11 @@ def main() -> None:
             sys.exit(1)
 
         # ツールをブロックして Claude に Discord 待機を伝える
-        print(json.dumps({
-            "decision": "block",
-            "reason": "Question sent to Discord as buttons. Please wait for the user's selection via Discord.",
-        }))
+        print(build_hook_output(
+            "deny",
+            reason="Question sent to Discord as buttons.",
+            additional_context="Please wait for the user's selection via Discord.",
+        ))
 
     # permissionTools 処理
     elif tool_name in permission_tools:
@@ -233,15 +254,19 @@ def main() -> None:
             sys.exit(0)  # タイムアウト → Claude Code デフォルト
 
         decision = result.get("decision", "allow")
-        if decision == "deny":
-            print(json.dumps({"decision": "deny", "reason": "User denied via Discord"}))
+        if decision == "allow":
+            print(build_hook_output("allow"))
+        elif decision == "deny":
+            print(build_hook_output("deny", reason="User denied via Discord"))
         elif decision == "block":
-            print(json.dumps({
-                "decision": "block",
-                "reason": "User chose 'Other' via Discord. Please wait for their input.",
-            }))
+            print(build_hook_output(
+                "deny",
+                reason="User chose 'Other' via Discord.",
+                additional_context="Please wait for their input.",
+            ))
         else:
-            print(json.dumps({"decision": decision}))
+            # 未知の decision は安全側に倒す（権限プロンプト表示）
+            print(build_hook_output("ask", reason=f"Unknown decision: {decision}"))
 
     else:
         sys.exit(0)  # 他のツールは素通り

@@ -10,7 +10,7 @@ Discord (Mobile/PC)
        |  Text / file attachments
        v
   TmuxSender
-       |  tmux send-keys / load-buffer + paste-buffer
+       |  tmux send-keys -l (bracketed paste)
        v
   tmux session:window               <- Isolated tmux session per server
        |  Claude Code processes
@@ -82,14 +82,56 @@ When a tool listed in `permissionTools` (e.g., `Bash`) is about to execute, Disc
 Messages can be sent and received from threads under monitored channels.
 
 - When you send a message from a thread, a new pane is automatically created in the parent channel's tmux window with an independent Claude Code session
-- The pane uses `thread.model` (falls back to `model`) and `thread.permission` to configure the Claude Code session
-- Setting `thread.permission` to `bypassPermissions` launches the pane with `--dangerously-skip-permissions`
 - Each thread has its own dedicated pane, operating independently from the parent channel's session
 - Claude's responses are sent directly to the thread (controlled via the `DISCORD_BRIDGE_THREAD_ID` environment variable)
 - Sending a message in the parent channel clears the active thread, and subsequent responses go to the parent channel
 - When multiple threads are used in the same channel, each thread gets its own dedicated pane
 - When a thread is archived, its corresponding pane is automatically terminated
 - If pane communication fails, it automatically falls back to the parent channel's session
+
+#### Per-Thread Config Template (3-Layer Merge)
+
+Each thread can individually override `model`, `projectPath`, `permission`, and `isolation`. Resolution priority (highest first):
+
+```
+threads[i] fields
+  → project.thread defaults (if omitted)  ※ projectPath skips this layer
+    → project fields (if omitted)
+```
+
+> **Note**: `projectPath` is not defined in `project.thread`, so it uses a 2-layer merge (`threads[i].projectPath` → `project.projectPath`). Only `model`, `permission`, and `isolation` use the full 3-layer merge.
+
+- Settings defined in a `threads[]` entry apply only to that thread
+- Setting `permission: "bypassPermissions"` launches the pane with `--dangerously-skip-permissions`
+- Settings for dynamically created threads (model, projectPath, permission, isolation) are automatically saved to `config.json`'s `threads[]`
+- `startup: true` on a thread entry auto-creates its pane on Bot startup
+
+#### Worktree Isolation (opt-in)
+
+Setting `isolation: "worktree"` in config (via `project.thread` or a `threads[]` entry) launches thread panes with Claude Code's `--worktree` (`-w`) flag, providing an isolated working environment via git worktree.
+
+- View each thread's changes from the main channel with `git worktree list` or `git diff`
+- Pane and worktree state is persisted in `~/.discord-bridge/thread-state.json`
+- Auto-recovery on restart after crash (worktree exists + pane gone → recreate pane)
+- Scans `.claude/worktrees/` on startup to detect and warn about orphaned worktrees
+- Force-removes worktree on thread archive (warns if uncommitted changes exist)
+- Notifies thread to archive when worktree is removed externally
+
+### Control Panel
+
+When `generalChannelId` is configured, a control panel is posted to that channel on Bot startup. It is refreshed by user actions (sending a message or pressing a button).
+
+- Lists each project's status (🟢 running / ⭕ stopped)
+- **▶ Start / 🛑 Stop** buttons to create or kill the project's tmux window
+- Shows the list of active worktrees
+
+#### Auto-Start (startup)
+
+The `startup` field in `config.json` controls automatic startup on Bot launch.
+
+- `project.startup: true` → automatically creates the project's tmux window on Bot startup
+- `project.startup: false` (default) and the window is running → stops the window on Bot startup
+- `threads[i].startup: true` → automatically creates that thread's pane on Bot startup
 
 ### Progress Notifications
 
@@ -99,13 +141,13 @@ Messages can be sent and received from threads under monitored channels.
 - Skips `AskUserQuestion` tool calls (handled by `pre_tool_use.py`)
 - Sends to the active thread if one exists, otherwise to the parent channel
 
-### Context Window Progress Bar + Rate Limits
+### Context / Model / Rate Limit Footer
 
-Displays context window usage and rate limit info at the end of every Discord message.
+Displays model name, context window usage, and rate limit info at the end of every Discord message.
 
 **Data flow:**
 
-1. `~/.claude/statusline.py` receives context info from Claude Code's statusLine API
+1. `~/.claude/statusline.py` receives context info and model name from Claude Code's statusLine API
 2. Same script fetches rate limit data via OAuth API (`/api/oauth/usage`) with 60s cache
 3. Caches to `/tmp/discord-bridge-context-{session_id}.json`
 4. `hooks/stop.py` reads the cache and appends the footer to the message
@@ -114,6 +156,7 @@ Displays context window usage and rate limit info at the end of every Discord me
 ```json
 {
   "used_percentage": 50,
+  "model": "Opus 4.6",
   "rate_limits": {
     "five_hour": {"utilization": 45, "resets_at": "2026-02-21T12:00:00Z"},
     "seven_day": {"utilization": 12, "resets_at": "2026-02-25T12:00:00Z"}
@@ -123,16 +166,10 @@ Displays context window usage and rate limit info at the end of every Discord me
 
 **Display format:**
 
-`📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
-
-| Range | Progress bar |
-|-------|---------|
-| 0-69% | `📊` |
-| 70-89% | `⚠️` |
-| 90-100% | `🚨` |
+`📊 Opus 4.6 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
 
 **Related files:**
-- `hooks/lib/context.py` — `format_footer()`, `format_progress_bar()`, `read_full_cache()`
+- `hooks/lib/context.py` — `format_footer()`, `format_context_status()`, `read_full_cache()`
 - `~/.claude/statusline.py` — Cache writer (outside project)
 
 ## IPC Files
@@ -143,7 +180,8 @@ Communication between hooks and the Bot uses file-based IPC.
 | --- | --- |
 | `/tmp/discord-bridge-thread-{parentChannelId}.json` | Active thread tracking (`{"threadId": "..."}` format) |
 | `/tmp/discord-bridge-perm-{channelId}.json` | Tool permission confirmation response (`{"decision": "allow\|deny\|block"}` format) |
-| `/tmp/discord-bridge-dedup-{sessionId}.json` | Stop hook duplicate send prevention |
+| `/tmp/discord-bridge-last-sent-{sessionId}.txt` | Stop hook duplicate send prevention (plain text: `{sessionId}:{transcript_mtime}`) |
 | `/tmp/discord-bridge-progress-{sessionId}.txt` | `pre_tool_progress.py` deduplication (MD5 hash of posted content) |
 | `/tmp/discord-bridge-debug.txt` | Debug log (`stop.py` / `pre_tool_progress.py` with `[progress]` prefix) |
 | `/tmp/discord-bridge-notify-debug.txt` | Debug log (`notify.py`) |
+| `~/.discord-bridge/thread-state.json` | Persistent thread pane and worktree state |

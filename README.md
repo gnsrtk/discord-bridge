@@ -15,7 +15,7 @@ Claude が応答を完了すると、結果が自動的に Discord へ返信さ�
 - **スレッド対応** — スレッドごとに独立した Claude Code セッション（tmux ペイン）を自動起動
 - **ボタン操作** — `AskUserQuestion` ツールを自動検出して Discord のボタンに変換（CLAUDE.md での使用推奨を推奨）
 - **ツール許可確認** — `Bash` 等の実行前に Discord で許可/拒否を選択可能
-- **途中経過通知** — ツール実行前に Claude の思考テキストを `🔄` 付きでリアルタイム転送
+- **途中経過通知** — ツール実行前に Claude の途中テキストを `🔄` 付きでリアルタイム転送
 
 > 詳細な動作の仕組みは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
 
@@ -24,7 +24,7 @@ Claude が応答を完了すると、結果が自動的に Discord へ返信さ�
 - **Node.js** 18 以上
 - **tmux** 3.0 以上
 - **Claude Code** 2.1.47 以上（`last_assistant_message` フィールド対応バージョン）
-- **Python** 3.10 以上（hooks 用）
+- **Python** 3.9 以上（hooks 用）
 - **Discord Bot トークン**（後述）
 
 ## インストール
@@ -78,7 +78,8 @@ bash install.sh
           }
         }
       ],
-      "permissionTools": ["Bash"]
+      "permissionTools": ["Bash"],
+      "generalChannelId": "コントロールパネル用 general チャンネルの ID（省略可）"
     }
   ]
 }
@@ -99,7 +100,11 @@ bash install.sh
 | `servers[].projects[].model` | 使用する Claude モデル（例: `claude-sonnet-4-6`） |
 | `servers[].projects[].thread.model` | スレッド用ペインで使用するモデル（省略時は `model` を継承） |
 | `servers[].projects[].thread.permission` | スレッド用ペインの権限モード。`bypassPermissions` を指定すると `--dangerously-skip-permissions` 付きで起動（省略時はデフォルト権限） |
+| `servers[].projects[].thread.isolation` | スレッド用ペインの隔離モード。`worktree` を指定すると git worktree で独立した作業環境を作成（省略時は隔離なし） |
+| `servers[].projects[].startup` | `true` にすると Bot 起動時にこのプロジェクトの tmux ウィンドウを自動作成（デフォルト: `false`） |
+| `servers[].projects[].threads[]` | スレッドごとの設定エントリ（Bot が自動保存）。各エントリに `name`・`channelId`・`model`・`projectPath`・`permission`・`isolation`・`startup` を設定可能 |
 | `servers[].permissionTools` | ツール実行前に Discord で許可確認を行うツール名のリスト（例: `["Bash"]`）。省略時は空 |
+| `servers[].generalChannelId` | コントロールパネル専用チャンネルの ID（省略可）。設定するとボット起動時にプロジェクト一覧・Start/Stop/Refresh ボタンを送信し、テキスト送信でステータスをリフレッシュ |
 
 > **重要**: `servers` には最低 1 件のエントリが必要です。各サーバーの `projects` にも最低 1 件必要です。`servers[0].projects[0]` は cwd がどのプロジェクトにも一致しない場合のフォールバックチャンネルとして使われます。
 
@@ -189,9 +194,9 @@ discord-bridge stop    # 停止
 `start` を実行すると以下が自動で行われます：
 
 1. 各サーバーの tmux セッションを作成（存在しない場合）
-2. 各プロジェクトの tmux ウィンドウを作成し、
+2. `startup: true` のプロジェクトの tmux ウィンドウを作成し、
    `cd <projectPath> && claude --model <model>` を実行（ウィンドウが既存の場合はスキップ）
-3. サーバーごとに Discord Bot を起動し、各プロジェクトのチャンネルに `🟢 Bot 起動` を通知
+3. サーバーごとに Discord Bot を起動し、`generalChannelId` が設定されている場合はそのチャンネルにコントロールパネルを送信
 4. PID を `~/.discord-bridge/discord-bridge.pid` に保存、
    ログを `~/.discord-bridge/discord-bridge.log` に書き出し
 

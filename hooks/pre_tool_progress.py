@@ -4,6 +4,7 @@
 ツール実行前に発火し、transcript から最新のアシスタントテキストを読み取って
 Discord に進捗通知として送信する。重複送信はハッシュで防止する。
 """
+from __future__ import annotations
 
 import hashlib
 import json

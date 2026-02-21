@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Notification hook: Claude確認待ちメッセージをDiscordに送信する"""
+from __future__ import annotations
 
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -13,6 +15,9 @@ from lib.config import load_config, resolve_channel
 from lib.thread import resolve_target_channel
 
 DEBUG = os.environ.get("DISCORD_BRIDGE_DEBUG") == "1"
+
+
+_RATE_LIMIT_MAX_RETRIES = 3
 
 
 def post_message(bot_token: str, channel_id: str, content: str) -> None:
@@ -28,11 +33,19 @@ def post_message(bot_token: str, channel_id: str, content: str) -> None:
         },
         method="POST",
     )
-    try:
-        urllib.request.urlopen(req, timeout=10).close()
-    except urllib.error.HTTPError as e:
-        print(f"[notify.py] API error: {e.code} {e.reason}", file=sys.stderr)
-        raise
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES):
+        try:
+            urllib.request.urlopen(req, timeout=10).close()
+            return
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                retry_after = float(e.headers.get("Retry-After", "1"))
+                print(f"[notify.py] Rate limited (429). Waiting {retry_after}s (attempt {attempt + 1}/{_RATE_LIMIT_MAX_RETRIES})", file=sys.stderr)
+                time.sleep(retry_after)
+                continue
+            print(f"[notify.py] API error: {e.code} {e.reason}", file=sys.stderr)
+            raise
+    raise urllib.error.URLError(f"Rate limit retries exhausted after {_RATE_LIMIT_MAX_RETRIES} attempts")
 
 
 def main() -> None:

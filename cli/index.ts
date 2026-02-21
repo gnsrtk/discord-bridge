@@ -49,6 +49,7 @@ export function setupTmuxWindowsForServer(server: Server): void {
   }
 
   for (const project of server.projects) {
+    if (!project.startup) continue;
     if (tmuxWindowExists(session, project.name)) continue;
 
     try {

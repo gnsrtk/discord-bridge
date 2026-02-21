@@ -56,6 +56,7 @@ const makeServer = (overrides: Partial<Server> = {}): Server => ({
       channelId: '444',
       projectPath: '/projects/a',
       model: 'claude-opus-4-6',
+      startup: true,
     },
   ],
   ...overrides,
@@ -185,7 +186,7 @@ describe('setupTmuxWindows', () => {
         makeServer({
           name: 'work',
           tmux: { session: 'work-session' },
-          projects: [{ name: 'proj-b', channelId: '555', projectPath: '/projects/b', model: 'claude-sonnet-4-6' }],
+          projects: [{ name: 'proj-b', channelId: '555', projectPath: '/projects/b', model: 'claude-sonnet-4-6', startup: true }],
         }),
       ],
     });

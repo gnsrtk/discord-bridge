@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-22
+
+### Added
+- スレッド worktree 隔離 (`thread.isolation: "worktree"`)
+  - Claude Code の `--worktree` (`-w`) フラグで各スレッドに独立した git worktree を作成
+  - メインチャンネルから `git worktree list` / `git diff` で各スレッドの変更を確認可能
+- 永続スレッド状態管理 (`~/.discord-bridge/thread-state.json`)
+  - クラッシュ後の自動復元
+  - 孤立 worktree の検出・警告
+  - アトミック書き込みによるファイル破損防止
+- worktree 消失検出: 外部から worktree が削除されたらアーカイブ促進メッセージを送信
+- スレッドアーカイブ時の未コミット変更警告
+- General チャンネル コントロールパネル (`generalChannelId` 設定フィールド)
+  - ボット起動時に general チャンネルへプロジェクト一覧・実行状態・操作ボタンを表示
+  - `▶ Start` / `🛑 Stop` ボタンで tmux ウィンドウを Discord から起動・停止
+  - `🔄 Refresh` ボタンでパネルをその場で更新
+  - general チャンネルへのテキスト送信でもステータス更新（tmux への転送なし）
+  - アクティブな worktree 一覧を表示（マルチサーバー時は当該サーバーのみ）
+  - Discord ボタン上限（5行×5ボタン=25）に対応した自動キャップ
+- `project.startup` フィールド（boolean, default: false）— Bot 起動時に `startup: true` のプロジェクトの tmux ウィンドウを自動起動
+  - `autoStartProjects()` (`src/bot.ts`) が `ClientReady` 時に実行
+  - `startup: false` かつ実行中のウィンドウは停止する（config との同期）
+- スレッド設定テンプレート機能 — `threads[]` エントリに `model` / `projectPath` / `permission` / `isolation` / `startup` を設定可能
+  - `resolveThreadConfig()` (`src/config.ts`) で `threads[i]` → `project.thread` → `project` の3層マージ
+    （`model` / `permission` / `isolation` が対象。`projectPath` は2層マージ）
+  - `appendThreadToConfig()` に `permission` / `isolation` の保存を追加（既存エントリ更新時は `startup` フラグを保持）
+  - `threads[i].startup: true` → Bot 起動時にそのスレッドのペインを自動作成
+
+### Changed
+- `hooks/pre_tool_use.py`: 許可確認の出力形式を `hookSpecificOutput.permissionDecision` 形式に移行
+  - `build_hook_output()` ヘルパーで出力を統一
+  - `decision: "block"` を `"deny"` に変更（`additionalContext` 付き）
+  - 未知の decision は `"ask"` にフォールバック（安全側）
+- `MessageCreate` / `restoreThreadState` / `autoStartStaticThreads` を `resolveThreadConfig()` 経由に統一
+  （`project.thread?.` 直接参照を廃止）
+- `restoreThreadState()` のプロジェクト検索を `parentChannelId` 基準に変更（`projectPath` オーバーライド対応）
+- `restoreThreadState()`: ペインが既存の場合も常に `threadPaneMap` に復元し重複起動を防止
+
+### Fixed
+- install.sh: Python バージョンチェックを 3.10+ → 3.9+ に修正（README と一致）
+
+### Other
+- `.gitignore` に `.worktrees/` を追加
+
+## v1.8.2
+
+### Changed
+- Footer: replaced progress bar graph with model name display
+- Display format: `📊 Opus 4.6 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
+- Added `format_context_status()` in `hooks/lib/context.py`
+- Cache now includes `model` from `~/.claude/statusline.py`
+
 ## v1.8.1
 
 ### Added
@@ -14,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `format_footer()`, `format_reset_time()`, `format_rate_limit_entry()`, `read_full_cache()` in `hooks/lib/context.py`
 - Cache now includes `rate_limits` from OAuth API via `~/.claude/statusline.py`
 - Display format: `📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
+
+### Fixed
+- `notify.py`: 429 rate limit retry logic added (was missing, unlike stop.py/pre_tool_progress.py)
+- All hook files: added `from __future__ import annotations` for Python 3.9 compatibility
+- `stop.py`: session_id 空時のデデュプファイル名衝突を防止
+- `transcript.py`: compact 後の summary エントリを境界として扱い、古いメッセージの混入を防止
+- `statusline.py`: キャッシュ書き込みをアトミック化（temp → rename）で race condition 防止
 
 ## v1.8.0
 
@@ -113,6 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   120秒タイムアウトで Claude Code デフォルト動作に委ねる (closes #44)
 - `src/config.ts`: `permissionTools` フィールドを追加
 - `hooks/pre_tool_use.py`: `permissionTools` に該当するツールの実行前にボタン送信・応答待機
+- `hooks/lib/config.py`: `resolve_channel()` の戻り値に `permission_tools` を追加し
+  `(channel_id, bot_token, project_name, permission_tools)` の4-tuple に変更
 
 ## [1.3.0] - 2026-02-19
 
@@ -197,7 +258,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 複数プロジェクト対応（チャンネルとプロジェクトディレクトリを 1:1 でマッピング）
 - `DISCORD_BRIDGE_DEBUG=1` によるデバッグログ出力
 
-[Unreleased]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.7...HEAD
+[Unreleased]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v2.0...HEAD
+[2.0.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.7...v2.0
 [1.7.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.6...v1.7
 [1.6.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.5...v1.6
 [1.5.0]: https://github.com/YOUR_USERNAME/discord-bridge/compare/v1.4...v1.5

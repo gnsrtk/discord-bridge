@@ -11,52 +11,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 
 from lib.context import (
-    format_progress_bar,
+    format_context_status,
     format_reset_time,
     format_rate_limit_entry,
     format_footer,
     read_context_cache,
     read_full_cache,
 )
-
-
-class TestFormatProgressBar:
-    def test_zero_percent(self):
-        result = format_progress_bar(0)
-        assert result == "📊 ░░░░░░░░░░ 0%"
-
-    def test_50_percent(self):
-        result = format_progress_bar(50)
-        assert result == "📊 █████░░░░░ 50%"
-
-    def test_100_percent(self):
-        result = format_progress_bar(100)
-        assert result == "🚨 ██████████ 100%"
-
-    def test_70_percent_warning(self):
-        result = format_progress_bar(70)
-        assert result.startswith("⚠️")
-        assert "70%" in result
-
-    def test_90_percent_critical(self):
-        result = format_progress_bar(90)
-        assert result.startswith("🚨")
-        assert "90%" in result
-
-    def test_rounds_to_nearest_block(self):
-        # 25% → 2.5 blocks → 3 filled (round)
-        result = format_progress_bar(25)
-        filled = result.count("█")
-        empty = result.count("░")
-        assert filled + empty == 10
-
-    def test_negative_clamped(self):
-        result = format_progress_bar(-5)
-        assert "0%" in result
-
-    def test_over_100_clamped(self):
-        result = format_progress_bar(150)
-        assert "100%" in result
 
 
 class TestFormatResetTime:
@@ -122,10 +83,42 @@ class TestFormatRateLimitEntry:
         assert result.startswith("session:0%")
 
 
+class TestFormatContextStatus:
+    def test_with_model(self):
+        result = format_context_status(50, "Opus 4.6")
+        assert result == "📊 Opus 4.6 50%"
+
+    def test_without_model(self):
+        result = format_context_status(50)
+        assert result == "📊 ctx 50%"
+
+    def test_none_model(self):
+        result = format_context_status(50, None)
+        assert result == "📊 ctx 50%"
+
+    def test_always_has_icon(self):
+        assert format_context_status(0, "Opus 4.6").startswith("📊")
+        assert format_context_status(70, "Opus 4.6").startswith("📊")
+        assert format_context_status(90, "Opus 4.6").startswith("📊")
+        assert format_context_status(100, "Opus 4.6").startswith("📊")
+
+    def test_clamped_to_0(self):
+        result = format_context_status(-5, "Opus 4.6")
+        assert result == "📊 Opus 4.6 0%"
+
+    def test_clamped_to_100(self):
+        result = format_context_status(150, "Opus 4.6")
+        assert result == "📊 Opus 4.6 100%"
+
+
 class TestFormatFooter:
-    def test_context_only(self):
+    def test_context_only_no_model(self):
         result = format_footer(50)
-        assert result == "📊 █████░░░░░ 50%"
+        assert result == "📊 ctx 50%"
+
+    def test_context_with_model(self):
+        result = format_footer(50, model="Opus 4.6")
+        assert result == "📊 Opus 4.6 50%"
 
     def test_context_with_rate_limits(self):
         future_session = datetime.now(timezone.utc) + timedelta(hours=2, minutes=30, seconds=30)
@@ -134,8 +127,8 @@ class TestFormatFooter:
             "five_hour": {"utilization": 45, "resets_at": future_session.isoformat()},
             "seven_day": {"utilization": 12, "resets_at": future_weekly.isoformat()},
         }
-        result = format_footer(50, rate_limits)
-        assert "📊 █████░░░░░ 50%" in result
+        result = format_footer(50, rate_limits, model="Opus 4.6")
+        assert "📊 Opus 4.6 50%" in result
         assert "session:45%(2h30m)" in result
         assert "weekly:12%(5d03h)" in result
         assert " │ " in result
@@ -151,29 +144,29 @@ class TestFormatFooter:
 
     def test_none_rate_limits(self):
         result = format_footer(50, None)
-        assert result == "📊 █████░░░░░ 50%"
+        assert result == "📊 ctx 50%"
 
     def test_empty_rate_limits(self):
         result = format_footer(50, {})
-        assert result == "📊 █████░░░░░ 50%"
+        assert result == "📊 ctx 50%"
 
     def test_invalid_utilization_skipped(self):
         rate_limits = {
             "five_hour": {"utilization": "bad", "resets_at": "2026-01-01T00:00:00Z"},
         }
         result = format_footer(50, rate_limits)
-        assert result == "📊 █████░░░░░ 50%"
+        assert result == "📊 ctx 50%"
 
     def test_non_dict_entry_skipped(self):
         rate_limits = {"five_hour": "invalid"}
         result = format_footer(50, rate_limits)
-        assert result == "📊 █████░░░░░ 50%"
+        assert result == "📊 ctx 50%"
 
     def test_non_dict_rate_limits_skipped(self):
         """rate_limits がリストや数値の場合、クラッシュせずスキップ。"""
-        assert format_footer(50, []) == "📊 █████░░░░░ 50%"
-        assert format_footer(50, 1) == "📊 █████░░░░░ 50%"
-        assert format_footer(50, "bad") == "📊 █████░░░░░ 50%"
+        assert format_footer(50, []) == "📊 ctx 50%"
+        assert format_footer(50, 1) == "📊 ctx 50%"
+        assert format_footer(50, "bad") == "📊 ctx 50%"
 
 
 class TestReadContextCache:

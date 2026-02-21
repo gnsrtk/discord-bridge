@@ -1,4 +1,5 @@
 """hooks/lib/thread.py — スレッドトラッキング用ユーティリティ"""
+from __future__ import annotations
 
 import json
 import os

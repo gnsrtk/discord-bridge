@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Stop hook: last_assistant_messageをDiscordに送信する"""
+from __future__ import annotations
 
 import json
 import os
@@ -204,7 +205,9 @@ def main() -> None:
 
     # transcript の mtime で重複判定（Interrupted時のStop再発火対策）
     # セッション単位でファイルを分離することで並行セッションの競合を防ぐ
-    last_sent_file = Path(f"/tmp/discord-bridge-last-sent-{session_id}.txt")
+    if not session_id:
+        _dbg("skipped dedup: no session_id")
+    last_sent_file = Path(f"/tmp/discord-bridge-last-sent-{session_id or 'unknown'}.txt")
     try:
         transcript_mtime = f"{Path(transcript_path).stat().st_mtime:.3f}" if transcript_path else "0"
     except OSError:
@@ -243,6 +246,7 @@ def main() -> None:
         footer = format_footer(
             int(cache_data["used_percentage"]),
             cache_data.get("rate_limits"),
+            cache_data.get("model"),
         )
         display_text += f"\n\n{footer}"
 

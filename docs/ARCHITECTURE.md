@@ -10,7 +10,7 @@ Discord (スマホ/PC)
        │  テキスト / ファイル添付
        ▼
   TmuxSender
-       │  tmux send-keys / load-buffer + paste-buffer
+       │  tmux send-keys -l (bracketed paste)
        ▼
   tmux セッション:ウィンドウ         ← サーバーごとに tmux セッションを分離
        │  Claude Code が処理
@@ -82,14 +82,56 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 監視対象チャンネル配下のスレッドからもメッセージの送受信が可能です。
 
 - スレッドからメッセージを送ると、親チャンネルの tmux ウィンドウに新しいペインが自動作成され、独立した Claude Code セッションが起動します
-- ペインの起動モデルは `thread.model`（未設定時は `model`）、権限は `thread.permission` で制御できます
-- `thread.permission` に `bypassPermissions` を指定すると `--dangerously-skip-permissions` 付きで起動します
 - 各スレッドは専用のペインを持ち、親チャンネルのセッションとは独立して動作します
 - Claude の応答はスレッドに直接返信されます（`DISCORD_BRIDGE_THREAD_ID` 環境変数で制御）
 - 親チャンネルにメッセージを送るとアクティブスレッドは解除され、以降の応答は親チャンネルに戻ります
 - 同一チャンネルで複数スレッドを使った場合、各スレッドがそれぞれ専用のペインを持ちます
 - スレッドがアーカイブされると、対応するペインは自動的に終了します
 - ペインの送信に失敗した場合は親チャンネルのセッションに自動フォールバックします
+
+#### スレッド設定テンプレート（3層マージ）
+
+スレッドごとに `model` / `projectPath` / `permission` / `isolation` を個別設定できます。設定の優先度（高い順）:
+
+```
+threads[i] フィールド
+  → project.thread デフォルト（省略時）※ projectPath はこの層をスキップ
+    → project フィールド（省略時）
+```
+
+> **注意**: `projectPath` は `project.thread` に定義がないため2層マージ（`threads[i].projectPath` → `project.projectPath`）になります。`model` / `permission` / `isolation` のみ3層マージです。
+
+- `config.json` の `threads[]` 各エントリに設定を記述すると、そのスレッドにだけ適用されます
+- `permission: "bypassPermissions"` を指定すると `--dangerously-skip-permissions` 付きで起動します
+- 動的に作成されたスレッドの設定（model, projectPath, permission, isolation）も `config.json` の `threads[]` に自動保存されます
+- `startup: true` を設定したスレッドは Bot 起動時に自動的にペインを作成します
+
+#### Worktree 隔離（opt-in）
+
+`isolation: "worktree"` を config に設定すると（project.thread または threads[] エントリで指定）、スレッドペインが Claude Code の `--worktree` (`-w`) フラグ付きで起動し、git worktree で隔離された作業環境を提供する。
+
+- メインチャンネルから `git worktree list` や `git diff` で各スレッドの変更を確認可能
+- ペイン・worktree の状態は `~/.discord-bridge/thread-state.json` に永続化
+- クラッシュ後の再起動時に自動復元（worktree あり + ペインなし → ペイン再作成）
+- 起動時に `.claude/worktrees/` をスキャンし、未登録の孤立 worktree を警告
+- スレッドアーカイブ時に worktree を強制削除（未コミット変更がある場合は事前に警告）
+- worktree が外部から削除された場合、スレッドに「アーカイブしてください」と通知
+
+### コントロールパネル
+
+`generalChannelId` を設定したチャンネルには、Bot 起動時にコントロールパネルが送信されます。その後はユーザーの操作（メッセージ送信・ボタン押下）により更新されます。
+
+- 各プロジェクトの起動状態（🟢 実行中 / ⭕ 停止中）をリスト表示
+- **▶ Start / 🛑 Stop** ボタンでプロジェクトの tmux ウィンドウを起動・停止
+- アクティブな Worktree の一覧を表示
+
+#### 自動起動（startup）
+
+`config.json` の `startup` フィールドで、Bot 起動時の自動起動を制御できます。
+
+- `project.startup: true` → Bot 起動時にプロジェクトの tmux ウィンドウを自動作成
+- `project.startup: false`（デフォルト）かつウィンドウが実行中の場合 → Bot 起動時に停止
+- `threads[i].startup: true` → Bot 起動時にそのスレッドのペインを自動作成
 
 ### 途中経過通知
 
@@ -99,13 +141,13 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 - `AskUserQuestion` ツールは既存の `pre_tool_use.py` が処理するためスキップ
 - スレッドがアクティブな場合はスレッドに送信、なければ親チャンネルへ
 
-### コンテキスト残量プログレスバー + レート制限
+### コンテキスト・モデル・レート制限フッター
 
-Claude の応答ごとに、Discord メッセージ末尾にコンテキスト使用量とレート制限情報を表示する。
+Claude の応答ごとに、Discord メッセージ末尾にモデル名・コンテキスト使用量・レート制限情報を表示する。
 
 **データフロー:**
 
-1. `~/.claude/statusline.py` が Claude Code の statusLine API からコンテキスト情報を受信
+1. `~/.claude/statusline.py` が Claude Code の statusLine API からコンテキスト情報とモデル名を受信
 2. 同スクリプトが OAuth API (`/api/oauth/usage`) でレート制限情報を取得（60秒キャッシュ付き）
 3. `/tmp/discord-bridge-context-{session_id}.json` にキャッシュ
 4. `hooks/stop.py` がキャッシュを読み取り、メッセージ末尾にフッターを追加
@@ -114,6 +156,7 @@ Claude の応答ごとに、Discord メッセージ末尾にコンテキスト�
 ```json
 {
   "used_percentage": 50,
+  "model": "Opus 4.6",
   "rate_limits": {
     "five_hour": {"utilization": 45, "resets_at": "2026-02-21T12:00:00Z"},
     "seven_day": {"utilization": 12, "resets_at": "2026-02-25T12:00:00Z"}
@@ -123,16 +166,10 @@ Claude の応答ごとに、Discord メッセージ末尾にコンテキスト�
 
 **表示フォーマット:**
 
-`📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
-
-| 範囲 | プログレスバー |
-|------|--------|
-| 0-69% | `📊` |
-| 70-89% | `⚠️` |
-| 90-100% | `🚨` |
+`📊 Opus 4.6 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
 
 **関連ファイル:**
-- `hooks/lib/context.py` — `format_footer()`, `format_progress_bar()`, `read_full_cache()`
+- `hooks/lib/context.py` — `format_footer()`, `format_context_status()`, `read_full_cache()`
 - `~/.claude/statusline.py` — キャッシュ書き込み（プロジェクト外）
 
 ## IPC ファイル
@@ -143,7 +180,8 @@ hooks と Bot の間はファイルベースの IPC で通信します。
 | --- | --- |
 | `/tmp/discord-bridge-thread-{parentChannelId}.json` | アクティブスレッドの追跡（`{"threadId": "..."}` 形式） |
 | `/tmp/discord-bridge-perm-{channelId}.json` | ツール許可確認の応答（`{"decision": "allow\|deny\|block"}` 形式） |
-| `/tmp/discord-bridge-dedup-{sessionId}.json` | Stop hook の重複送信防止 |
+| `/tmp/discord-bridge-last-sent-{sessionId}.txt` | Stop hook の重複送信防止（`{sessionId}:{transcript_mtime}` 形式のプレーンテキスト） |
 | `/tmp/discord-bridge-progress-{sessionId}.txt` | `pre_tool_progress.py` の重複送信防止（送信コンテンツの MD5 ハッシュ） |
 | `/tmp/discord-bridge-debug.txt` | デバッグログ（`stop.py` / `pre_tool_progress.py`、`[progress]` プレフィックス） |
 | `/tmp/discord-bridge-notify-debug.txt` | デバッグログ（`notify.py`） |
+| `~/.discord-bridge/thread-state.json` | スレッドペイン・worktree の永続状態 |

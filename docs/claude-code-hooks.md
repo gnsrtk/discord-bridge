@@ -179,7 +179,7 @@ payload = {
 
 ## discord-bridge の改善ポイント
 
-1. **PreToolUse 新仕様対応** — `hookSpecificOutput` 形式に移行
+1. ~~**PreToolUse 新仕様対応**~~ — `hookSpecificOutput` 形式に移行済み
 2. **stop_hook_active チェック** — stop.py に無限ループ防止を追加
 3. **ボタン無効化** — bot.ts で `btn.update()` を使用
 4. ~~**途中経過通知**~~ — `pre_tool_progress.py` で実装済み（v1.7）。メッセージ編集方式への改善は今後検討
