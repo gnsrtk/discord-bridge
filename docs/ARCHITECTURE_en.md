@@ -99,26 +99,40 @@ Messages can be sent and received from threads under monitored channels.
 - Skips `AskUserQuestion` tool calls (handled by `pre_tool_use.py`)
 - Sends to the active thread if one exists, otherwise to the parent channel
 
-### Context Window Progress Bar
+### Context Window Progress Bar + Rate Limits
 
-Displays context window usage as a progress bar at the end of every Discord message.
+Displays context window usage and rate limit info at the end of every Discord message.
 
 **Data flow:**
 
 1. `~/.claude/statusline.py` receives context info from Claude Code's statusLine API
-2. Caches to `/tmp/discord-bridge-context-{session_id}.json` (`{"used_percentage": N}`)
-3. `hooks/stop.py` reads the cache and appends the progress bar to the message
+2. Same script fetches rate limit data via OAuth API (`/api/oauth/usage`) with 60s cache
+3. Caches to `/tmp/discord-bridge-context-{session_id}.json`
+4. `hooks/stop.py` reads the cache and appends the footer to the message
+
+**Cache format:**
+```json
+{
+  "used_percentage": 50,
+  "rate_limits": {
+    "five_hour": {"utilization": 45, "resets_at": "2026-02-21T12:00:00Z"},
+    "seven_day": {"utilization": 12, "resets_at": "2026-02-25T12:00:00Z"}
+  }
+}
+```
 
 **Display format:**
 
-| Range | Example |
+`📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
+
+| Range | Progress bar |
 |-------|---------|
-| 0-69% | `📊 ██████░░░░ 62%` |
-| 70-89% | `⚠️ ████████░░ 80%` |
-| 90-100% | `🚨 █████████░ 95%` |
+| 0-69% | `📊` |
+| 70-89% | `⚠️` |
+| 90-100% | `🚨` |
 
 **Related files:**
-- `hooks/lib/context.py` — `format_progress_bar()`, `read_context_cache()`
+- `hooks/lib/context.py` — `format_footer()`, `format_progress_bar()`, `read_full_cache()`
 - `~/.claude/statusline.py` — Cache writer (outside project)
 
 ## IPC Files

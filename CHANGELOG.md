@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v1.8.1
+
+### Added
+- Rate limit info (session/weekly utilization + reset time) on every Discord message footer
+- `format_footer()`, `format_reset_time()`, `format_rate_limit_entry()`, `read_full_cache()` in `hooks/lib/context.py`
+- Cache now includes `rate_limits` from OAuth API via `~/.claude/statusline.py`
+- Display format: `📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
+
 ## v1.8.0
 
 ### Added

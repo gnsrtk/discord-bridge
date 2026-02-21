@@ -99,26 +99,40 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 - `AskUserQuestion` ツールは既存の `pre_tool_use.py` が処理するためスキップ
 - スレッドがアクティブな場合はスレッドに送信、なければ親チャンネルへ
 
-### コンテキスト残量プログレスバー
+### コンテキスト残量プログレスバー + レート制限
 
-Claude の応答ごとに、Discord メッセージ末尾にコンテキストウィンドウ使用量のプログレスバーを表示する。
+Claude の応答ごとに、Discord メッセージ末尾にコンテキスト使用量とレート制限情報を表示する。
 
 **データフロー:**
 
 1. `~/.claude/statusline.py` が Claude Code の statusLine API からコンテキスト情報を受信
-2. `/tmp/discord-bridge-context-{session_id}.json` にキャッシュ（`{"used_percentage": N}`）
-3. `hooks/stop.py` がキャッシュを読み取り、メッセージ末尾にプログレスバーを追加
+2. 同スクリプトが OAuth API (`/api/oauth/usage`) でレート制限情報を取得（60秒キャッシュ付き）
+3. `/tmp/discord-bridge-context-{session_id}.json` にキャッシュ
+4. `hooks/stop.py` がキャッシュを読み取り、メッセージ末尾にフッターを追加
+
+**キャッシュ形式:**
+```json
+{
+  "used_percentage": 50,
+  "rate_limits": {
+    "five_hour": {"utilization": 45, "resets_at": "2026-02-21T12:00:00Z"},
+    "seven_day": {"utilization": 12, "resets_at": "2026-02-25T12:00:00Z"}
+  }
+}
+```
 
 **表示フォーマット:**
 
-| 範囲 | 表示例 |
+`📊 █████░░░░░ 50% │ session:45%(2h30m) │ weekly:12%(5d03h)`
+
+| 範囲 | プログレスバー |
 |------|--------|
-| 0-69% | `📊 ██████░░░░ 62%` |
-| 70-89% | `⚠️ ████████░░ 80%` |
-| 90-100% | `🚨 █████████░ 95%` |
+| 0-69% | `📊` |
+| 70-89% | `⚠️` |
+| 90-100% | `🚨` |
 
 **関連ファイル:**
-- `hooks/lib/context.py` — `format_progress_bar()`, `read_context_cache()`
+- `hooks/lib/context.py` — `format_footer()`, `format_progress_bar()`, `read_full_cache()`
 - `~/.claude/statusline.py` — キャッシュ書き込み（プロジェクト外）
 
 ## IPC ファイル

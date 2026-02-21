@@ -796,6 +796,42 @@ class TestStopContextProgressBar:
         finally:
             Path(cache_path).unlink(missing_ok=True)
 
+    def test_progress_bar_with_rate_limits(self):
+        """rate_limits がキャッシュにある場合、session/weekly 情報も表示される。"""
+        session_id = str(uuid.uuid4())
+        cache_path = f"/tmp/discord-bridge-context-{session_id}.json"
+        from datetime import datetime, timezone, timedelta
+        future = (datetime.now(timezone.utc) + timedelta(hours=2, minutes=30)).isoformat()
+        cache_data = {
+            "used_percentage": 50,
+            "rate_limits": {
+                "five_hour": {"utilization": 45, "resets_at": future},
+                "seven_day": {"utilization": 12, "resets_at": future},
+            },
+        }
+        Path(cache_path).write_text(json.dumps(cache_data))
+
+        hook_input = {
+            "session_id": session_id,
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": "Done.",
+        }
+        mock_config = {"schemaVersion": 2, "servers": []}
+        try:
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+                 mock.patch("stop.load_config", return_value=mock_config), \
+                 mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test", [])), \
+                 mock.patch("stop.post_message") as mock_post:
+                stop.main()
+            content = mock_post.call_args[0][2]
+            assert "50%" in content
+            assert "session:45%" in content
+            assert "weekly:12%" in content
+            assert "│" in content
+        finally:
+            Path(cache_path).unlink(missing_ok=True)
+
     def test_no_cache_no_bar(self):
         """コンテキストキャッシュがない場合、プログレスバーは付かない。"""
         session_id = str(uuid.uuid4())
