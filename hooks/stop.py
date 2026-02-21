@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from lib.config import load_config, resolve_channel
 from lib.thread import resolve_target_channel, clear_thread_tracking
 from lib.transcript import get_assistant_messages
-from lib.context import format_progress_bar, read_context_cache, CACHE_PATH_TEMPLATE
+from lib.context import format_footer, read_full_cache, CACHE_PATH_TEMPLATE
 
 DEBUG = os.environ.get("DISCORD_BRIDGE_DEBUG") == "1"
 _DEBUG_FILE = "/tmp/discord-bridge-debug.txt"
@@ -236,11 +236,15 @@ def main() -> None:
     clean_message, attach_paths = extract_attachments(message)
     display_text = clean_message
 
-    # Append context progress bar if cache exists
+    # Append context + rate limit footer if cache exists
     cache_path = CACHE_PATH_TEMPLATE.format(session_id=session_id)
-    used_pct = read_context_cache(cache_path)
-    if used_pct is not None:
-        display_text += f"\n\n{format_progress_bar(used_pct)}"
+    cache_data = read_full_cache(cache_path)
+    if cache_data is not None:
+        footer = format_footer(
+            int(cache_data["used_percentage"]),
+            cache_data.get("rate_limits"),
+        )
+        display_text += f"\n\n{footer}"
 
     _dbg(f"sending: text={display_text[:40]!r} attach={len(attach_paths)}")
     try:
