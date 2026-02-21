@@ -99,6 +99,28 @@ Messages can be sent and received from threads under monitored channels.
 - Skips `AskUserQuestion` tool calls (handled by `pre_tool_use.py`)
 - Sends to the active thread if one exists, otherwise to the parent channel
 
+### Context Window Progress Bar
+
+Displays context window usage as a progress bar at the end of every Discord message.
+
+**Data flow:**
+
+1. `~/.claude/statusline.py` receives context info from Claude Code's statusLine API
+2. Caches to `/tmp/discord-bridge-context-{session_id}.json` (`{"used_percentage": N}`)
+3. `hooks/stop.py` reads the cache and appends the progress bar to the message
+
+**Display format:**
+
+| Range | Example |
+|-------|---------|
+| 0-69% | `📊 ██████░░░░ 62%` |
+| 70-89% | `⚠️ ████████░░ 80%` |
+| 90-100% | `🚨 █████████░ 95%` |
+
+**Related files:**
+- `hooks/lib/context.py` — `format_progress_bar()`, `read_context_cache()`
+- `~/.claude/statusline.py` — Cache writer (outside project)
+
 ## IPC Files
 
 Communication between hooks and the Bot uses file-based IPC.

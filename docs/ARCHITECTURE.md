@@ -99,6 +99,28 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 - `AskUserQuestion` ツールは既存の `pre_tool_use.py` が処理するためスキップ
 - スレッドがアクティブな場合はスレッドに送信、なければ親チャンネルへ
 
+### コンテキスト残量プログレスバー
+
+Claude の応答ごとに、Discord メッセージ末尾にコンテキストウィンドウ使用量のプログレスバーを表示する。
+
+**データフロー:**
+
+1. `~/.claude/statusline.py` が Claude Code の statusLine API からコンテキスト情報を受信
+2. `/tmp/discord-bridge-context-{session_id}.json` にキャッシュ（`{"used_percentage": N}`）
+3. `hooks/stop.py` がキャッシュを読み取り、メッセージ末尾にプログレスバーを追加
+
+**表示フォーマット:**
+
+| 範囲 | 表示例 |
+|------|--------|
+| 0-69% | `📊 ██████░░░░ 62%` |
+| 70-89% | `⚠️ ████████░░ 80%` |
+| 90-100% | `🚨 █████████░ 95%` |
+
+**関連ファイル:**
+- `hooks/lib/context.py` — `format_progress_bar()`, `read_context_cache()`
+- `~/.claude/statusline.py` — キャッシュ書き込み（プロジェクト外）
+
 ## IPC ファイル
 
 hooks と Bot の間はファイルベースの IPC で通信します。

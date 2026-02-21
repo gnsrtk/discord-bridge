@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v1.8.0
+
+### Added
+- Context window progress bar on every Discord message footer
+- `hooks/lib/context.py` — progress bar formatting utilities
+- Cache integration in `~/.claude/statusline.py` for context data
+
+### Fixed
+- Fixed stale test `test_message_sent_with_title` (title removed in v1.7)
+
 ## [1.7.0] - 2026-02-20
 
 ### Added

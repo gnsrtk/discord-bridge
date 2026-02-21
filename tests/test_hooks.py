@@ -243,8 +243,8 @@ class TestStopMain:
         assert exc_info.value.code == 0
         mock_post.assert_not_called()
 
-    def test_message_sent_with_title(self):
-        """有効な last_assistant_message はタイトル付きで Discord に送信される。"""
+    def test_message_sent(self):
+        """有効な last_assistant_message は Discord に送信される。"""
         hook_input = {
             "session_id": str(uuid.uuid4()),
             "transcript_path": "",
@@ -259,7 +259,6 @@ class TestStopMain:
             stop.main()
         mock_post.assert_called_once()
         content = mock_post.call_args[0][2]
-        assert "✅ Claude 完了" in content
         assert "実装完了しました。" in content
 
     def test_dedup_prevents_second_send(self, tmp_path):
@@ -765,3 +764,53 @@ class TestStopMainWithThread:
             assert not tracking_file.exists()
         finally:
             tracking_file.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# stop.main with context progress bar
+# ---------------------------------------------------------------------------
+
+class TestStopContextProgressBar:
+    def test_progress_bar_appended(self):
+        """コンテキストキャッシュがある場合、プログレスバーがメッセージ末尾に付く。"""
+        session_id = str(uuid.uuid4())
+        cache_path = f"/tmp/discord-bridge-context-{session_id}.json"
+        Path(cache_path).write_text(json.dumps({"used_percentage": 42}))
+
+        hook_input = {
+            "session_id": session_id,
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": "Done.",
+        }
+        mock_config = {"schemaVersion": 2, "servers": []}
+        try:
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+                 mock.patch("stop.load_config", return_value=mock_config), \
+                 mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test", [])), \
+                 mock.patch("stop.post_message") as mock_post:
+                stop.main()
+            content = mock_post.call_args[0][2]
+            assert "████░░░░░░" in content
+            assert "42%" in content
+        finally:
+            Path(cache_path).unlink(missing_ok=True)
+
+    def test_no_cache_no_bar(self):
+        """コンテキストキャッシュがない場合、プログレスバーは付かない。"""
+        session_id = str(uuid.uuid4())
+        hook_input = {
+            "session_id": session_id,
+            "transcript_path": "",
+            "cwd": "/tmp/test-project",
+            "last_assistant_message": "Done.",
+        }
+        mock_config = {"schemaVersion": 2, "servers": []}
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(hook_input))), \
+             mock.patch("stop.load_config", return_value=mock_config), \
+             mock.patch("stop.resolve_channel", return_value=("chan-001", "token-xxx", "test", [])), \
+             mock.patch("stop.post_message") as mock_post:
+            stop.main()
+        content = mock_post.call_args[0][2]
+        assert "█" not in content
+        assert "░" not in content
