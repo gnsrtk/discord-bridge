@@ -541,6 +541,58 @@ describe('appendThreadToConfig', () => {
     expect(thread.permission).toBeUndefined();
     expect(thread.isolation).toBeUndefined();
   });
+
+  test('inMemoryProject を渡すとメモリ上の threads も同期される', () => {
+    const memProject = {
+      name: 'proj', channelId: 'proj-ch-1', projectPath: '/project/path',
+      model: 'claude-sonnet-4-6', thread: undefined, permissionTools: [] as string[],
+      threads: [] as Array<{ name: string; channelId: string; model?: string; startup: boolean }>,
+    };
+    appendThreadToConfig('personal', 'proj-ch-1', {
+      name: 'new-thread',
+      channelId: 'th-new',
+      model: 'claude-opus-4-6',
+      projectPath: '/project/path',
+    }, tmpFile, memProject);
+
+    expect(memProject.threads).toHaveLength(1);
+    expect(memProject.threads[0]).toEqual({
+      name: 'new-thread', channelId: 'th-new', model: 'claude-opus-4-6', startup: false,
+    });
+  });
+
+  test('inMemoryProject で既存スレッドは上書きマージされる', () => {
+    const memProject = {
+      name: 'proj', channelId: 'proj-ch-1', projectPath: '/project/path',
+      model: 'claude-sonnet-4-6', thread: undefined, permissionTools: [] as string[],
+      threads: [{ name: 'old-name', channelId: 'th-exist', startup: true }],
+    };
+    appendThreadToConfig('personal', 'proj-ch-1', {
+      name: 'updated-name',
+      channelId: 'th-exist',
+      model: 'claude-opus-4-6',
+      projectPath: '/project/path',
+    }, tmpFile, memProject);
+
+    expect(memProject.threads).toHaveLength(1);
+    expect(memProject.threads[0].name).toBe('updated-name');
+    expect(memProject.threads[0].model).toBe('claude-opus-4-6');
+    // startup は既存値を保持
+    expect(memProject.threads[0].startup).toBe(true);
+  });
+
+  test('inMemoryProject を渡さない場合はメモリ更新しない（後方互換）', () => {
+    appendThreadToConfig('personal', 'proj-ch-1', {
+      name: 'thread',
+      channelId: 'th-compat',
+      model: 'claude-sonnet-4-6',
+      projectPath: '/project/path',
+    }, tmpFile);
+    // ディスクには書き込まれている
+    const saved = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+    expect(saved.servers[0].projects[0].threads).toHaveLength(1);
+    // inMemoryProject が undefined なのでクラッシュしないことが確認できればOK
+  });
 });
 
 // ---------------------------------------------------------------------------

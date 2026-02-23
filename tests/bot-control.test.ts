@@ -1,7 +1,8 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { listRunningWindows, startProjectWindow, stopProjectWindow, buildControlPanel, autoStartProjects } from '../src/bot.js';
 import { ThreadStateManager } from '../src/thread-state.js';
 import type { Project } from '../src/config.js';
+import { unlinkSync } from 'node:fs';
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
@@ -58,7 +59,7 @@ describe('startProjectWindow', () => {
     const project = mockProject('my-app');
     startProjectWindow('my-session', project);
     const calls = vi.mocked(execFileSync).mock.calls;
-    expect(calls[0]).toEqual(['tmux', ['new-window', '-t', 'my-session', '-n', 'my-app', '-d']]);
+    expect(calls[0]).toEqual(['tmux', ['new-window', '-t', 'my-session:', '-n', 'my-app', '-d']]);
     expect(calls[1]![0]).toBe('tmux');
     expect(calls[1]![1]).toEqual(expect.arrayContaining(['send-keys', '-t', 'my-session:my-app']));
     expect(String(calls[1]![1]![3])).toContain('claude --model');
@@ -119,6 +120,80 @@ describe('buildControlPanel', () => {
     expect(components.length).toBeGreaterThan(1);
     const allBtns = components.flatMap(row => row.components);
     expect(allBtns.length).toBe(6);
+  });
+
+  test('スレッドがある場合 Threads セクションを表示する', () => {
+    vi.mocked(execFileSync).mockReturnValue('' as never);
+    const tmpFile = `/tmp/test-state-control-thread-${Date.now()}.json`;
+    const stateManager = new ThreadStateManager(tmpFile);
+
+    const project: Project = {
+      ...mockProject('proj-t'),
+      threads: [{ name: 'my-thread', channelId: 'ch-thread-1', model: 'claude-sonnet-4-6', startup: false }],
+    };
+
+    // スレッドを active として登録
+    stateManager.set('ch-thread-1', {
+      paneId: '%10',
+      paneStartedAt: '2026-01-01T00:00:00Z',
+      parentChannelId: 'ch-proj-t',
+      projectPath: '/home/user/proj-t',
+      serverName: 'test-server',
+      createdAt: '2026-01-01T00:00:00Z',
+      launchCmd: 'claude',
+    });
+
+    const { content } = buildControlPanel('sess', [project], stateManager, 'test-server');
+
+    expect(content).toContain('**Threads**');
+    expect(content).toContain('🟢 `my-thread` (proj-t) — active');
+
+    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+  });
+
+  test('スレッドが idle の場合は ⭕ で表示する', () => {
+    vi.mocked(execFileSync).mockReturnValue('' as never);
+    const stateManager = new ThreadStateManager('/tmp/test-state-control-nonexistent4.json');
+
+    const project: Project = {
+      ...mockProject('proj-u'),
+      threads: [{ name: 'idle-thread', channelId: 'ch-thread-idle', model: 'claude-sonnet-4-6', startup: false }],
+    };
+
+    // stateManager には登録しない（idle）
+    const { content } = buildControlPanel('sess', [project], stateManager, 'test-server');
+
+    expect(content).toContain('**Threads**');
+    expect(content).toContain('⭕ `idle-thread` (proj-u) — idle');
+  });
+
+  test('worktree ありスレッドは Active Worktrees セクションにスレッド名で表示', () => {
+    vi.mocked(execFileSync).mockReturnValue('' as never);
+    const tmpFile = `/tmp/test-state-control-wt-${Date.now()}.json`;
+    const stateManager = new ThreadStateManager(tmpFile);
+
+    const project: Project = {
+      ...mockProject('proj-w'),
+      threads: [{ name: 'wt-thread', channelId: 'ch-thread-wt', model: 'claude-sonnet-4-6', startup: false }],
+    };
+
+    stateManager.set('ch-thread-wt', {
+      paneId: '%20',
+      paneStartedAt: '2026-01-01T00:00:00Z',
+      parentChannelId: 'ch-proj-w',
+      projectPath: '/home/user/proj-w',
+      serverName: 'test-server',
+      createdAt: '2026-01-01T00:00:00Z',
+      launchCmd: 'claude',
+      worktreePath: '/home/user/proj-w/.claude/worktrees/wt-abc',
+    });
+
+    const { content } = buildControlPanel('sess', [project], stateManager, 'test-server');
+
+    expect(content).toContain('**Active Worktrees**');
+    expect(content).toContain('`wt-thread` →');
+
+    try { unlinkSync(tmpFile); } catch { /* ignore */ }
   });
 });
 

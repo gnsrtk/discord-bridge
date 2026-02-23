@@ -46,7 +46,10 @@ describe('handleInteractionCreate', () => {
     user: { id: 'owner-123' },
     channelId: 'ch-abc',
     customId: 'yes',
+    message: { content: '元のメッセージ' },
     reply: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   });
 
@@ -57,21 +60,27 @@ describe('handleInteractionCreate', () => {
     vi.clearAllMocks();
   });
 
-  test('tmux 送信成功時は ✅ を返す', async () => {
+  test('tmux 送信成功時は ✅ で update を呼ぶ', async () => {
     const btn = makeBtn();
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '✅ Selected: yes', ephemeral: true });
+    expect(btn.update).toHaveBeenCalledWith({
+      content: '元のメッセージ\n\n✅ 選択: yes',
+      components: [],
+    });
   });
 
-  test('tmux 送信失敗時でも ❌ でインタラクションを acknowledge する', async () => {
+  test('tmux 送信失敗時でも ❌ で update を呼ぶ', async () => {
     vi.mocked(execFileSync).mockImplementation(() => { throw new Error('tmux not found'); });
     const btn = makeBtn();
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '❌ Failed to send', ephemeral: true });
+    expect(btn.update).toHaveBeenCalledWith({
+      content: '元のメッセージ\n\n❌ 送信失敗: yes',
+      components: [],
+    });
   });
 
-  test('btn.reply が失敗してもエラーを伝播しない', async () => {
-    const btn = makeBtn({ reply: vi.fn().mockRejectedValue(new Error('interaction expired')) });
+  test('btn.update が失敗してもエラーを伝播しない', async () => {
+    const btn = makeBtn({ update: vi.fn().mockRejectedValue(new Error('interaction expired')) });
     await expect(handleInteractionCreate(btn, 'owner-123', map, defaultSender)).resolves.toBeUndefined();
   });
 
@@ -87,17 +96,18 @@ describe('handleInteractionCreate', () => {
     expect(btn.reply).toHaveBeenCalledWith({ content: 'Unauthorized', ephemeral: true });
   });
 
-  test('__other__ ボタンは tmux に送信せず案内リプライを返す', async () => {
+  test('__other__ ボタンは update + followUp を呼ぶ', async () => {
     const btn = makeBtn({ customId: '__other__' });
     await handleInteractionCreate(btn, 'owner-123', map, defaultSender);
-    expect(btn.reply).toHaveBeenCalledWith({ content: '📝 Please enter your answer', ephemeral: false });
+    expect(btn.update).toHaveBeenCalledWith({ content: '元のメッセージ', components: [] });
+    expect(btn.followUp).toHaveBeenCalledWith({ content: '📝 回答を入力してください' });
     expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
   });
 
-  test('__other__ ボタンの reply 失敗時もエラーを伝播しない', async () => {
+  test('__other__ ボタンの update 失敗時もエラーを伝播しない', async () => {
     const btn = makeBtn({
       customId: '__other__',
-      reply: vi.fn().mockRejectedValue(new Error('interaction expired')),
+      update: vi.fn().mockRejectedValue(new Error('interaction expired')),
     });
     await expect(handleInteractionCreate(btn, 'owner-123', map, defaultSender)).resolves.toBeUndefined();
     expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();

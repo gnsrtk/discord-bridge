@@ -39,6 +39,7 @@ export function appendThreadToConfig(
   projectChannelId: string,
   thread: { name: string; channelId: string; model: string; projectPath: string; permission?: string; isolation?: string },
   configPath: string = DEFAULT_CONFIG_PATH,
+  inMemoryProject?: Project,
 ): void {
   try {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -63,6 +64,16 @@ export function appendThreadToConfig(
       project.threads.push(entry);
     }
     writeFileSync(configPath, JSON.stringify(raw, null, 2));
+
+    // メモリ上の Project も同期（コントロールパネル Refresh で即時反映するため）
+    if (inMemoryProject) {
+      const memIdx = inMemoryProject.threads.findIndex(t => t.channelId === thread.channelId);
+      if (memIdx >= 0) {
+        inMemoryProject.threads[memIdx] = { ...inMemoryProject.threads[memIdx], name: thread.name, model: thread.model };
+      } else {
+        inMemoryProject.threads.push({ name: thread.name, channelId: thread.channelId, model: thread.model, startup: false as const });
+      }
+    }
   } catch (err) {
     console.error('[discord-bridge] appendThreadToConfig failed:', err);
   }
@@ -279,9 +290,28 @@ export function buildControlPanel(
   }
 
   const allThreads = stateManager.getAll();
+  const activeThreadIds = new Set(allThreads.keys());
+
+  const hasAnyThreads = projects.some(p => p.threads?.length > 0);
+  if (hasAnyThreads) {
+    lines.push('', '**Threads**');
+    for (const project of projects) {
+      for (const thread of project.threads ?? []) {
+        const isActive = activeThreadIds.has(thread.channelId);
+        lines.push(`${isActive ? '🟢' : '⭕'} \`${thread.name}\` (${project.name}) — ${isActive ? 'active' : 'idle'}`);
+      }
+    }
+  }
+
   const worktrees = [...allThreads.entries()]
     .filter(([, info]) => info.worktreePath && info.serverName === serverName)
-    .map(([threadId, info]) => `• Thread ${threadId.slice(0, 6)}... → ${info.worktreePath}`);
+    .map(([threadId, info]) => {
+      for (const project of projects) {
+        const thread = project.threads?.find(t => t.channelId === threadId);
+        if (thread) return `• \`${thread.name}\` → ${info.worktreePath}`;
+      }
+      return `• Thread ${threadId.slice(0, 6)}... → ${info.worktreePath}`;
+    });
   if (worktrees.length > 0) {
     lines.push('', '**Active Worktrees**');
     lines.push(...worktrees);
@@ -703,7 +733,7 @@ export function createServerBot(server: Server): Client {
               projectPath: resolved.projectPath,
               permission: resolved.permission,
               isolation: resolved.isolation,
-            });
+            }, DEFAULT_CONFIG_PATH, project);
 
             // worktree パス検出 (バックグラウンド)
             // stateManager + threadPaneMap の両方から最新の既知パスを収集し、
@@ -814,6 +844,11 @@ export function createServerBot(server: Server): Client {
       }
       threadPaneMap.delete(newThread.id);
       stateManager.remove(newThread.id);
+      // メモリ上の project.threads からも除去（Refresh で idle 表示が残らないように）
+      const parentProject = server.projects.find(p => p.channelId === info.parentChannelId);
+      if (parentProject) {
+        parentProject.threads = parentProject.threads.filter(t => t.channelId !== newThread.id);
+      }
     }
   });
 
