@@ -102,7 +102,7 @@ def post_buttons(bot_token: str, channel_id: str, content: str, components: list
 
 def build_components(questions: list) -> list:
     """AskUserQuestion の questions 配列から Discord ActionRow 配列を構築する。
-    先頭の質問のみ処理（1 質問 = 1 ActionRow、各選択肢をボタンに変換、最大5個）。
+    先頭の質問のみ処理（1行目: 選択肢ボタン最大5個、2行目: その他ボタン）。
     """
     q = questions[0]
     options = q.get("options", [])[:5]  # Discord は1行に最大5ボタン
@@ -117,7 +117,16 @@ def build_components(questions: list) -> list:
         })
     if not buttons:
         return []
-    return [{"type": 1, "components": buttons}]  # ActionRow
+    other_row = {
+        "type": 1,
+        "components": [{
+            "type": 2,   # Button
+            "style": 2,  # Secondary (灰)
+            "label": "その他（テキスト入力）",
+            "custom_id": "__other__",
+        }],
+    }
+    return [{"type": 1, "components": buttons}, other_row]
 
 
 def build_content(preceding_text: str, question_text: str) -> str:

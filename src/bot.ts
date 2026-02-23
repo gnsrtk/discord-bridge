@@ -445,7 +445,8 @@ export async function handleInteractionCreate(
   }
   if (btn.customId === '__other__') {
     try {
-      await btn.reply({ content: '📝 Please enter your answer', ephemeral: false });
+      await btn.update({ content: btn.message.content, components: [] });
+      await btn.followUp({ content: '📝 回答を入力してください' });
     } catch { /* ignore */ }
     return;
   }
@@ -489,6 +490,7 @@ export async function handleInteractionCreate(
     return;
   }
   const resolvedBtnChannelId = resolveParentChannel(btn.channelId, channelSenderMap, threadParentMap, btn.channel);
+  const label = btn.customId.includes(':') ? btn.customId.split(':').slice(1).join(':') : btn.customId;
   let sent = false;
   try {
     handleButtonInteraction(resolvedBtnChannelId, btn.customId, channelSenderMap, defaultSender, btn.channelId, threadPaneMap);
@@ -497,10 +499,9 @@ export async function handleInteractionCreate(
     console.error('[discord-bridge] Failed to handle button interaction:', err);
   }
   try {
-    const label = btn.customId.includes(':') ? btn.customId.split(':').slice(1).join(':') : btn.customId;
-    const replyContent = sent ? `✅ Selected: ${label}` : '❌ Failed to send';
-    await btn.reply({ content: replyContent, ephemeral: true });
-  } catch { /* ignore reply failure */ }
+    const status = sent ? `✅ 選択: ${label}` : `❌ 送信失敗: ${label}`;
+    await btn.update({ content: `${btn.message.content}\n\n${status}`, components: [] });
+  } catch { /* ignore update failure */ }
 }
 
 export function handleButtonInteraction(

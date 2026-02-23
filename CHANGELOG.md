@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.1] - 2026-02-23
+
+### Fixed
+
+- `src/bot.ts`: AskUserQuestion ボタン押下時に `btn.reply({ ephemeral })` → `btn.update()` に変更。
+  ボタン削除+選択結果表示を即座に行い、3秒タイムアウトエラーを防止
+- `src/bot.ts`: `__other__` ボタン押下時に `btn.update()` + `btn.followUp()` に変更。
+  ボタン削除後「📝 回答を入力してください」を表示
+
+### Added
+
+- `hooks/pre_tool_use.py`: AskUserQuestion のボタンに「その他（テキスト入力）」ボタン（灰色）を
+  2行目の ActionRow として常に追加。AskUserQuestion の「Other」に相当する自由入力オプション
 
 ## [2.0.0] - 2026-02-22
 
