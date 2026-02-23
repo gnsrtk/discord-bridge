@@ -64,6 +64,14 @@ info "[2/4] Building..."
 npm ci --silent
 npm run build --silent
 ok "Build complete"
+
+SCRIPT_DIR_BUILD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR_BUILD/hooks/requirements.txt" ]; then
+  python3 -m pip install --break-system-packages -q -r "$SCRIPT_DIR_BUILD/hooks/requirements.txt" 2>/dev/null \
+    || python3 -m pip install -q -r "$SCRIPT_DIR_BUILD/hooks/requirements.txt" 2>/dev/null \
+    || warn "Python 依存のインストールに失敗しました。手動で pip install -r hooks/requirements.txt を実行してください。"
+  ok "Python dependencies installed"
+fi
 echo ""
 
 # ── 3. グローバルリンク ────────────────────────────────────

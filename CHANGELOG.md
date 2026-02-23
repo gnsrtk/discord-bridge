@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-02-23
+
+### Added
+
+- Markdown テーブル → ASCII テーブル自動変換 — Claude の応答に含まれる Markdown テーブルを
+  `tabulate` ライブラリで ASCII テーブルに変換し、コードブロックで囲んで Discord に送信
+- 2000 文字超えメッセージの分割送信 — 改行位置で分割して複数メッセージで送信
+- `hooks/lib/table.py`: `parse_markdown_table()`, `convert_tables_in_text()` を追加
+- `hooks/requirements.txt`: Python 依存（tabulate, wcwidth）を管理
+- `install.sh`: Python 依存の自動インストールを追加
+
 ## [2.0.2] - 2026-02-23
 
 ### Added

@@ -17,6 +17,7 @@ from lib.config import load_config, resolve_channel
 from lib.thread import resolve_target_channel, clear_thread_tracking
 from lib.transcript import get_assistant_messages
 from lib.context import format_footer, read_full_cache, CACHE_PATH_TEMPLATE
+from lib.table import convert_tables_in_text
 
 DEBUG = os.environ.get("DISCORD_BRIDGE_DEBUG") == "1"
 _DEBUG_FILE = "/tmp/discord-bridge-debug.txt"
@@ -156,6 +157,9 @@ def post_message_with_files(
     _send_request(req, timeout=30)
 
 
+DISCORD_MAX_CONTENT = 2000
+
+
 def post_message(bot_token: str, channel_id: str, content: str) -> None:
     payload = json.dumps({"content": content}).encode()
     url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
@@ -170,6 +174,30 @@ def post_message(bot_token: str, channel_id: str, content: str) -> None:
         method="POST",
     )
     _send_request(req, timeout=10)
+
+
+def _split_message(text: str, max_len: int = DISCORD_MAX_CONTENT) -> list[str]:
+    """テキストを max_len 以下のチャンクに分割する。改行位置で分割を試みる。"""
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    while text:
+        if len(text) <= max_len:
+            chunks.append(text)
+            break
+        # 改行で分割を試みる
+        split_at = text.rfind("\n", 0, max_len)
+        if split_at <= 0:
+            split_at = max_len
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip("\n")
+    return chunks
+
+
+def send_message(bot_token: str, channel_id: str, content: str) -> None:
+    """2000 文字を超える場合は分割して送信する。"""
+    for chunk in _split_message(content):
+        post_message(bot_token, channel_id, chunk)
 
 
 def main() -> None:
@@ -237,7 +265,7 @@ def main() -> None:
     _dbg(f"cwd: {cwd!r} -> channel_id: {channel_id} target: {target_channel} project: {project_name!r}")
 
     clean_message, attach_paths = extract_attachments(message)
-    display_text = clean_message
+    display_text = convert_tables_in_text(clean_message)
 
     # Append context + rate limit footer if cache exists
     cache_path = CACHE_PATH_TEMPLATE.format(session_id=session_id)
@@ -255,7 +283,7 @@ def main() -> None:
         if attach_paths:
             post_message_with_files(bot_token, target_channel, display_text, attach_paths)
         else:
-            post_message(bot_token, target_channel, display_text)
+            send_message(bot_token, target_channel, display_text)
         _dbg("sent OK")
     except urllib.error.HTTPError as e:
         if e.code == 404 and target_channel != channel_id:
@@ -265,7 +293,7 @@ def main() -> None:
                 if attach_paths:
                     post_message_with_files(bot_token, channel_id, display_text, attach_paths)
                 else:
-                    post_message(bot_token, channel_id, display_text)
+                    send_message(bot_token, channel_id, display_text)
                 _dbg("fallback sent OK")
             except urllib.error.URLError as e2:
                 print(f"[stop.py] Fallback API request failed: {e2}", file=sys.stderr)

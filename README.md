@@ -36,7 +36,7 @@ bash install.sh
 ```
 
 `install.sh` が以下を自動で行います：前提チェック・ビルド・`npm link`・
-`~/.discord-bridge/config.json` テンプレート生成。
+Python 依存インストール（`tabulate`, `wcwidth`）・`~/.discord-bridge/config.json` テンプレート生成。
 
 ## Discord Bot の準備
 
@@ -178,7 +178,7 @@ Discord との連携に必要なフックを設定します（3イベント / 4�
 
 | ファイル | タイミング | 役割 |
 | --- | --- | --- |
-| `hooks/stop.py` | Claude が応答完了 | Claude の最後の返答テキスト（`last_assistant_message`）を Discord へ送信 |
+| `hooks/stop.py` | Claude が応答完了 | Claude の最後の返答テキスト（`last_assistant_message`）を Discord へ送信。Markdown テーブルは ASCII テーブルに自動変換 |
 | `hooks/notify.py` | Claude が通知を発火 | 重要な通知を Discord へ転送（`idle_prompt` は除外） |
 | `hooks/pre_tool_use.py` | ツール実行前 | AskUserQuestion を Discord のボタン付きメッセージに変換。`permissionTools` に設定されたツールの許可確認ボタンを表示 |
 | `hooks/pre_tool_progress.py` | ツール実行前（非同期） | Claude の途中テキストを `🔄` プレフィックス付きで Discord へ送信。送信コンテンツのハッシュで重複防止 |
