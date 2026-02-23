@@ -489,6 +489,33 @@ export async function handleInteractionCreate(
     } catch { /* ignore */ }
     return;
   }
+
+  // plan: prefix → file-based IPC for plan approval hooks
+  if (btn.customId.startsWith('plan:')) {
+    if (!/^\d+$/.test(btn.channelId)) return;
+
+    const resolvedChannelId = resolveParentChannel(
+      btn.channelId, channelSenderMap, threadParentMap, btn.channel,
+    );
+    const action = btn.customId.slice(5); // "approve" | "reject"
+    const respPath = `/tmp/discord-bridge-plan-${resolvedChannelId}.json`;
+
+    const decision = action === 'approve' ? 'approve' : 'reject';
+    try {
+      writeFileSync(respPath, JSON.stringify({ decision }));
+    } catch (err) {
+      console.error('[discord-bridge] Failed to write plan response:', err);
+    }
+
+    try {
+      await btn.reply({
+        content: decision === 'approve' ? '✅ Plan approved' : '❌ Plan rejected',
+        ephemeral: false,
+      });
+    } catch { /* ignore */ }
+    return;
+  }
+
   const resolvedBtnChannelId = resolveParentChannel(btn.channelId, channelSenderMap, threadParentMap, btn.channel);
   const label = btn.customId.includes(':') ? btn.customId.split(':').slice(1).join(':') : btn.customId;
   let sent = false;

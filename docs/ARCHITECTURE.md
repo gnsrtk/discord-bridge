@@ -80,6 +80,15 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 - **それ以外**: 「📝 理由を入力してください」と表示され、次のメッセージで理由を送信できます
 - 120秒以内に応答がない場合は Claude Code のデフォルト動作に委ねられます
 
+### Plan mode 承認（ExitPlanMode）
+
+Claude Code の Plan mode で `ExitPlanMode` が呼ばれると、Discord に **Approve / Reject** の2ボタンが表示されます。
+
+- **Approve**（緑）: プランを承認し、Claude が実装フェーズに移行します
+- **Reject**（赤）: プランを却下し、Claude がプランモードに留まります。フィードバックは通常メッセージで送信できます
+- ボタンメッセージには transcript から取得したプラン概要が含まれます
+- 120秒以内に応答がない場合は Claude Code のデフォルト動作（ターミナルプロンプト）に委ねられます
+
 ### スレッド対応
 
 監視対象チャンネル配下のスレッドからもメッセージの送受信が可能です。
@@ -183,6 +192,7 @@ hooks と Bot の間はファイルベースの IPC で通信します。
 | --- | --- |
 | `/tmp/discord-bridge-thread-{parentChannelId}.json` | アクティブスレッドの追跡（`{"threadId": "..."}` 形式） |
 | `/tmp/discord-bridge-perm-{channelId}.json` | ツール許可確認の応答（`{"decision": "allow\|deny\|block"}` 形式） |
+| `/tmp/discord-bridge-plan-{channelId}.json` | Plan mode 承認の応答（`{"decision": "approve\|reject"}` 形式） |
 | `/tmp/discord-bridge-last-sent-{sessionId}.txt` | Stop hook の重複送信防止（`{sessionId}:{transcript_mtime}` 形式のプレーンテキスト） |
 | `/tmp/discord-bridge-progress-{sessionId}.txt` | `pre_tool_progress.py` の重複送信防止（送信コンテンツの MD5 ハッシュ） |
 | `/tmp/discord-bridge-debug.txt` | デバッグログ（`stop.py` / `pre_tool_progress.py`、`[progress]` プレフィックス） |

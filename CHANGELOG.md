@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-02-23
+
+### Added
+
+- Plan mode 承認の Discord ボタン化 — `ExitPlanMode` ツール呼び出し時に
+  Discord へ **Approve / Reject** の2ボタンを送信。ファイルベース IPC
+  （`/tmp/discord-bridge-plan-{channelId}.json`）で Bot → hook 間の応答を受け渡し。
+  120秒タイムアウトで Claude Code デフォルト動作に委ねる
+- `hooks/pre_tool_use.py`: `post_plan_buttons()` / `wait_for_plan_decision()` を追加
+- `src/bot.ts`: `plan:` prefix のボタンハンドラを追加
+
 ## [2.0.1] - 2026-02-23
 
 ### Fixed
