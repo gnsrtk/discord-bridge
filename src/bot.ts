@@ -170,7 +170,7 @@ export function listRunningWindows(session: string): Set<string> {
 }
 
 export function startProjectWindow(session: string, project: Project): void {
-  execFileSync('tmux', ['new-window', '-t', session, '-n', project.name, '-d']);
+  execFileSync('tmux', ['new-window', '-t', `${session}:`, '-n', project.name, '-d']);
   const cmd = `cd "${escapeTmuxShellArg(project.projectPath)}" && claude --model "${escapeTmuxShellArg(project.model)}"`;
   execFileSync('tmux', ['send-keys', '-t', `${session}:${project.name}`, cmd, 'Enter']);
 }
