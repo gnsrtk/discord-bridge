@@ -257,9 +257,9 @@ def main() -> None:
 
     try:
         channel_id, bot_token, project_name, _ = resolve_channel(config, cwd)
-    except ValueError as e:
-        print(f"[stop.py] Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except ValueError:
+        _dbg(f"skipped: no project matches cwd={cwd!r}")
+        sys.exit(0)
 
     target_channel = resolve_target_channel(channel_id)
     _dbg(f"cwd: {cwd!r} -> channel_id: {channel_id} target: {target_channel} project: {project_name!r}")

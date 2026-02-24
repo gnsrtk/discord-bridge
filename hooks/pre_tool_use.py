@@ -20,9 +20,7 @@ PERM_RESPONSE_DIR = "/tmp"
 PERM_POLL_INTERVAL = 1.0  # 秒
 PERM_TIMEOUT = 120  # 秒
 
-PLAN_RESPONSE_DIR = "/tmp"
-PLAN_POLL_INTERVAL = 1.0  # 秒
-PLAN_TIMEOUT = 120  # 秒
+PLAN_APPROVED_DIR = "/tmp"  # Discord経由の事前承認フラグ置き場
 
 
 def format_tool_info(tool_name: str, tool_input: dict) -> str:
@@ -96,20 +94,13 @@ def post_plan_buttons(bot_token: str, channel_id: str, content: str) -> None:
     post_buttons(bot_token, channel_id, content, components)
 
 
-def wait_for_plan_decision(channel_id: str) -> dict | None:
-    """プラン承認応答ファイルをポーリング。タイムアウトで None。"""
-    resp_file = Path(f"{PLAN_RESPONSE_DIR}/discord-bridge-plan-{channel_id}.json")
-    resp_file.unlink(missing_ok=True)
-    for _ in range(int(PLAN_TIMEOUT / PLAN_POLL_INTERVAL)):
-        time.sleep(PLAN_POLL_INTERVAL)
-        if resp_file.exists():
-            try:
-                data = json.loads(resp_file.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            resp_file.unlink(missing_ok=True)
-            return data
-    return None
+def check_plan_pre_approved(channel_id: str) -> bool:
+    """Discord経由の事前承認フラグが存在するかチェックし、あれば削除して True を返す。"""
+    flag = Path(f"{PLAN_APPROVED_DIR}/discord-bridge-plan-approved-{channel_id}")
+    if flag.exists():
+        flag.unlink(missing_ok=True)
+        return True
+    return False
 
 
 def post_buttons(bot_token: str, channel_id: str, content: str, components: list) -> None:
@@ -161,9 +152,21 @@ def build_components(questions: list) -> list:
     return [{"type": 1, "components": buttons}, other_row]
 
 
-def build_content(preceding_text: str, question_text: str) -> str:
+def build_content(preceding_text: str, question_text: str, options: list | None = None) -> str:
     """直前テキストと質問文を結合して Discord メッセージ本文を作る。"""
     question_part = f"**❓ {question_text}**"
+    if options:
+        option_lines = []
+        for opt in options:
+            label = opt.get("label", "")
+            desc = opt.get("description", "")
+            if desc:
+                option_lines.append(f"• **{label}** — {desc}")
+        if option_lines:
+            question_part += "\n" + "\n".join(option_lines)
+    # question_part 自体が上限を超える場合は切り詰め
+    if len(question_part) > DISCORD_MAX_CONTENT:
+        question_part = question_part[:DISCORD_MAX_CONTENT - 1] + "…"
     if not preceding_text:
         return question_part
     # 合計が上限を超える場合は直前テキストを切り詰める
@@ -215,9 +218,8 @@ def main() -> None:
 
     try:
         channel_id, bot_token, _, permission_tools = resolve_channel(config, cwd)
-    except ValueError as e:
-        print(f"[pre_tool_use.py] Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except ValueError:
+        sys.exit(0)
 
     target_channel = resolve_target_channel(channel_id)
 
@@ -238,7 +240,8 @@ def main() -> None:
                 preceding_text = "\n\n".join(messages)
 
         question_text = questions[0].get("question", "(no question)")
-        content = build_content(preceding_text, question_text)
+        options = questions[0].get("options", [])[:5]
+        content = build_content(preceding_text, question_text, options)
         components = build_components(questions)
 
         if not components:
@@ -270,6 +273,14 @@ def main() -> None:
 
     # ExitPlanMode 処理（Plan mode 承認/却下）
     elif tool_name == "ExitPlanMode":
+        # Discord経由の事前承認フラグがあればそのまま許可（2回目の呼び出し）
+        if check_plan_pre_approved(channel_id):
+            print(build_hook_output("allow"))
+            sys.exit(0)
+
+        # 古いフラグが残存していた場合に備えてクリア
+        Path(f"{PLAN_APPROVED_DIR}/discord-bridge-plan-approved-{channel_id}").unlink(missing_ok=True)
+
         # transcript から直前テキスト（プラン概要）を取得
         preceding_text = ""
         if transcript_path:
@@ -302,19 +313,12 @@ def main() -> None:
         except urllib.error.URLError:
             sys.exit(0)
 
-        result = wait_for_plan_decision(channel_id)
-        if result is None:
-            sys.exit(0)  # タイムアウト → Claude Code デフォルト
-
-        decision = result.get("decision", "approve")
-        if decision == "approve":
-            print(build_hook_output("allow"))
-        elif decision == "reject":
-            print(build_hook_output(
-                "deny", reason="Plan rejected via Discord. Wait for user feedback.",
-            ))
-        else:
-            print(build_hook_output("ask"))
+        # AskUserQuestion と同じ方式: deny して Discord からの tmux 応答を待つ
+        print(build_hook_output(
+            "deny",
+            reason="Plan approval sent to Discord as buttons.",
+            additional_context="Please wait for the user's approval via Discord.",
+        ))
 
     # permissionTools 処理
     elif tool_name in permission_tools:

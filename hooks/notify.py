@@ -76,9 +76,8 @@ def main() -> None:
 
     try:
         channel_id, bot_token, _, _ = resolve_channel(config, cwd)
-    except ValueError as e:
-        print(f"[notify.py] Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except ValueError:
+        sys.exit(0)
 
     target_channel = resolve_target_channel(channel_id)
     content = message or "(no message)"

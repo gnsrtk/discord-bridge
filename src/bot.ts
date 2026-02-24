@@ -317,7 +317,7 @@ export function buildControlPanel(
     lines.push(...worktrees);
   }
 
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const now = new Date().toLocaleString('sv-SE').slice(0, 16);
   lines.push('', `_Updated: ${now}_`);
   const content = lines.join('\n');
 
@@ -520,28 +520,34 @@ export async function handleInteractionCreate(
     return;
   }
 
-  // plan: prefix → file-based IPC for plan approval hooks
+  // plan: prefix → flag file + tmux relay for plan approval
   if (btn.customId.startsWith('plan:')) {
     if (!/^\d+$/.test(btn.channelId)) return;
 
     const resolvedChannelId = resolveParentChannel(
       btn.channelId, channelSenderMap, threadParentMap, btn.channel,
     );
-    const action = btn.customId.slice(5); // "approve" | "reject"
-    const respPath = `/tmp/discord-bridge-plan-${resolvedChannelId}.json`;
+    const decision = btn.customId.slice(5); // "approve" | "reject"
 
-    const decision = action === 'approve' ? 'approve' : 'reject';
+    // approve: 事前承認フラグを書き込み（次回の ExitPlanMode フック用）
+    if (decision === 'approve') {
+      try {
+        writeFileSync(`/tmp/discord-bridge-plan-approved-${resolvedChannelId}`, '');
+      } catch (err) {
+        console.error('[discord-bridge] Failed to write plan approval flag:', err);
+      }
+    }
+
+    // tmux 経由で Claude Code に送信（AskUserQuestion と同じ方式）
     try {
-      writeFileSync(respPath, JSON.stringify({ decision }));
+      handleButtonInteraction(resolvedChannelId, btn.customId, channelSenderMap, defaultSender, btn.channelId, threadPaneMap);
     } catch (err) {
-      console.error('[discord-bridge] Failed to write plan response:', err);
+      console.error('[discord-bridge] Failed to send plan decision via tmux:', err);
     }
 
     try {
-      await btn.reply({
-        content: decision === 'approve' ? '✅ Plan approved' : '❌ Plan rejected',
-        ephemeral: false,
-      });
+      const status = decision === 'approve' ? '✅ Plan approved' : '❌ Plan rejected';
+      await btn.update({ content: `${btn.message.content}\n\n${status}`, components: [] });
     } catch { /* ignore */ }
     return;
   }

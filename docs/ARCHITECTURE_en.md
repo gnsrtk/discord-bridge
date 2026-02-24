@@ -23,6 +23,7 @@ Discord channel reply
 
 Supports multiple servers and projects. Each server has its own Bot token and tmux session.
 Channels are mapped 1:1 to project directories and auto-resolved via longest-prefix match on cwd.
+If `cwd` does not match any `projectPath`, hooks exit silently without sending to Discord.
 
 ## Message Forwarding (Discord -> Claude Code)
 
@@ -64,8 +65,12 @@ The `customId` content is sent directly to the Claude Code session
 
 When Claude Code uses the `AskUserQuestion` tool, `pre_tool_use.py` automatically converts it into a Discord message with buttons. This is the recommended approach for all questions, confirmations, and choices presented to the user.
 
+- Each option's `description` is displayed as a bullet list below the question text
+- Row 1: option buttons (blue, up to 5)
+- Row 2: "Other (text input)" button (gray) — for free-form responses
+- After pressing a button, it is removed from the message and the selection is displayed
+- When "Other" is pressed, the message shows "📝 Please enter your response"
 - Plain text questions are not converted to buttons — the user must manually type a response
-- `AskUserQuestion` enables one-tap responses with clearly presented options
 - Add an instruction to use `AskUserQuestion` in your CLAUDE.md to ensure consistent agent behavior
 
 ### Tool Permission Confirmation
@@ -76,6 +81,20 @@ When a tool listed in `permissionTools` (e.g., `Bash`) is about to execute, Disc
 - **Deny** (red): Blocks tool execution
 - **Other**: Displays a prompt to enter a reason, and the next message can provide one
 - If no response within 120 seconds, Claude Code's default behavior applies
+
+### Plan Mode Approval (ExitPlanMode)
+
+When Claude Code's Plan mode calls `ExitPlanMode`, Discord displays **Approve / Reject** buttons.
+
+**Flow:**
+1. `pre_tool_use.py`: Sends buttons to Discord, then denies the tool call (Claude Code enters a waiting state)
+2. User presses **Approve** on Discord
+3. `bot.ts`: Writes flag file `/tmp/discord-bridge-plan-approved-{channelId}` + sends `approve` via tmux
+4. Claude Code receives the tmux input and calls `ExitPlanMode` again
+5. `pre_tool_use.py`: Finds the flag file → allows → Claude transitions to implementation phase
+
+- **Reject** (red): Sends `reject` via tmux; Claude stays in plan mode. Feedback can be sent as a regular message
+- Button message includes the plan summary extracted from the transcript
 
 ### Thread Support
 
@@ -180,6 +199,7 @@ Communication between hooks and the Bot uses file-based IPC.
 | --- | --- |
 | `/tmp/discord-bridge-thread-{parentChannelId}.json` | Active thread tracking (`{"threadId": "..."}` format) |
 | `/tmp/discord-bridge-perm-{channelId}.json` | Tool permission confirmation response (`{"decision": "allow\|deny\|block"}` format) |
+| `/tmp/discord-bridge-plan-approved-{channelId}` | Plan mode pre-approval flag (empty file, deleted immediately after read) |
 | `/tmp/discord-bridge-last-sent-{sessionId}.txt` | Stop hook duplicate send prevention (plain text: `{sessionId}:{transcript_mtime}`) |
 | `/tmp/discord-bridge-progress-{sessionId}.txt` | `pre_tool_progress.py` deduplication (MD5 hash of posted content) |
 | `/tmp/discord-bridge-debug.txt` | Debug log (`stop.py` / `pre_tool_progress.py` with `[progress]` prefix) |

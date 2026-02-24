@@ -13,7 +13,7 @@ def load_config() -> dict:
 def resolve_channel(config: dict, cwd: str) -> tuple[str, str, str | None, list[str]]:
     """cwd から (channel_id, bot_token, project_name, permission_tools) を解決する。
     servers[] をループし、projectPath × cwd で最長一致を選択。
-    不一致時は servers[0].projects[0] にフォールバック。
+    不一致時は ValueError を raise する。
     """
     best_channel_id: str | None = None
     best_bot_token: str | None = None
@@ -36,15 +36,4 @@ def resolve_channel(config: dict, cwd: str) -> tuple[str, str, str | None, list[
     if best_channel_id and best_bot_token:
         return best_channel_id, best_bot_token, best_project_name, best_permission_tools
 
-    # フォールバック
-    servers = config.get("servers", [])
-    if not servers or not servers[0].get("projects"):
-        raise ValueError("servers is empty in config.json")
-    first_server = servers[0]
-    first_project = first_server["projects"][0]
-    return (
-        first_project["channelId"],
-        first_server["discord"]["botToken"],
-        None,
-        first_server.get("permissionTools", []),
-    )
+    raise ValueError(f"No project matches cwd: {cwd!r}")

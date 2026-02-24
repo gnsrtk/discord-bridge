@@ -23,6 +23,7 @@ Discord チャンネルへ返信
 
 複数サーバー・複数プロジェクトに対応しており、サーバーごとに Bot トークンと tmux セッションを分離できます。
 チャンネルとプロジェクトディレクトリは 1:1 でマッピングされ、cwd ベースの最長一致で自動解決します。
+`cwd` がどの `projectPath` にも一致しない場合、フックはサイレントに終了し Discord への送信は行いません。
 
 ## メッセージ転送（Discord → Claude Code）
 
@@ -64,6 +65,7 @@ Discord のボタンインタラクションも受け付けます。
 
 Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が自動的に Discord のボタン付きメッセージに変換します。ユーザーへの質問・確認・選択にはこのツールの使用を推奨します。
 
+- 質問文の下に各選択肢の説明（`description`）を箇条書きで表示
 - 1行目: 選択肢ボタン（青、最大5個）
 - 2行目: 「その他（テキスト入力）」ボタン（灰色）— 自由入力が必要な場合に使用
 - ボタン押下後は元メッセージからボタンが削除され、選択結果が表示される
@@ -84,10 +86,15 @@ Claude Code の `AskUserQuestion` ツールを使うと、`pre_tool_use.py` が�
 
 Claude Code の Plan mode で `ExitPlanMode` が呼ばれると、Discord に **Approve / Reject** の2ボタンが表示されます。
 
-- **Approve**（緑）: プランを承認し、Claude が実装フェーズに移行します
-- **Reject**（赤）: プランを却下し、Claude がプランモードに留まります。フィードバックは通常メッセージで送信できます
+**フロー:**
+1. `pre_tool_use.py`: Discord にボタン送信後 deny でブロック（Claude Code が待機状態に入る）
+2. ユーザーが Discord の **Approve** ボタンを押す
+3. `bot.ts`: フラグファイル `/tmp/discord-bridge-plan-approved-{channelId}` を書き込み + tmux で `approve` を送信
+4. Claude Code が tmux 入力を受け取り、再度 `ExitPlanMode` を呼ぶ
+5. `pre_tool_use.py`: フラグファイルを確認して allow → Claude が実装フェーズに移行
+
+- **Reject**（赤）: tmux で `reject` を送信し、Claude がプランモードに留まります。フィードバックは通常メッセージで送信できます
 - ボタンメッセージには transcript から取得したプラン概要が含まれます
-- 120秒以内に応答がない場合は Claude Code のデフォルト動作（ターミナルプロンプト）に委ねられます
 
 ### スレッド対応
 
@@ -201,7 +208,7 @@ hooks と Bot の間はファイルベースの IPC で通信します。
 | --- | --- |
 | `/tmp/discord-bridge-thread-{parentChannelId}.json` | アクティブスレッドの追跡（`{"threadId": "..."}` 形式） |
 | `/tmp/discord-bridge-perm-{channelId}.json` | ツール許可確認の応答（`{"decision": "allow\|deny\|block"}` 形式） |
-| `/tmp/discord-bridge-plan-{channelId}.json` | Plan mode 承認の応答（`{"decision": "approve\|reject"}` 形式） |
+| `/tmp/discord-bridge-plan-approved-{channelId}` | Plan mode の事前承認フラグ（空ファイル、読み取り後即削除） |
 | `/tmp/discord-bridge-last-sent-{sessionId}.txt` | Stop hook の重複送信防止（`{sessionId}:{transcript_mtime}` 形式のプレーンテキスト） |
 | `/tmp/discord-bridge-progress-{sessionId}.txt` | `pre_tool_progress.py` の重複送信防止（送信コンテンツの MD5 ハッシュ） |
 | `/tmp/discord-bridge-debug.txt` | デバッグログ（`stop.py` / `pre_tool_progress.py`、`[progress]` プレフィックス） |
